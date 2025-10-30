@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ConstruyeSeguro</title>
+    <link rel="manifest" href="/assets/manifest.json" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-o9N1j7kP5LwCyt3HcCfM3Uk3MqQ6Y+1p8g+M3DJ0XGk="
+      crossorigin=""
+    />
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body class="bg-slate-950 text-slate-100">
+    <header class="bg-slate-900/80 backdrop-blur sticky top-0 z-40">
+      <div class="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+        <div class="flex items-center gap-3">
+          <div class="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500 text-lg font-bold text-slate-900">
+            CS
+          </div>
+          <span class="text-xl font-semibold">ConstruyeSeguro</span>
+        </div>
+        <nav class="hidden gap-6 text-sm font-medium md:flex">
+          <a href="#inicio" class="hover:text-emerald-400">Inicio</a>
+          <a href="#mi-proyecto" class="hover:text-emerald-400">Mi Proyecto</a>
+          <a href="#manual" class="hover:text-emerald-400">Manual</a>
+          <a href="#videos" class="hover:text-emerald-400">Videos</a>
+          <a href="#marketplace" class="hover:text-emerald-400">Marketplace</a>
+          <a href="#financiamiento" class="hover:text-emerald-400">Financiamiento</a>
+        </nav>
+        <button
+          id="assistanceButton"
+          class="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-emerald-400"
+        >
+          Asistencia inmediata
+        </button>
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-6xl space-y-24 px-6 py-12" id="inicio">
+      <section class="grid gap-10 md:grid-cols-[1.2fr,0.8fr] md:items-center">
+        <div class="space-y-6">
+          <p class="text-xs uppercase tracking-[0.3em] text-emerald-400">Autoconstrucción inteligente</p>
+          <h1 class="text-4xl font-black leading-tight md:text-5xl">
+            Construye tu hogar con confianza
+          </h1>
+          <p class="text-lg text-slate-300">
+            ConstruyeSeguro te acompaña en cada paso de la autoconstrucción. Obtén planos personalizados, guías prácticas y acceso a expertos verificados.
+          </p>
+          <div class="flex flex-wrap gap-4">
+            <a
+              href="#mi-proyecto"
+              class="rounded-full bg-emerald-500 px-6 py-3 text-sm font-semibold text-slate-900 shadow-lg shadow-emerald-500/30 transition hover:-translate-y-0.5 hover:bg-emerald-400"
+            >
+              Iniciar mi proyecto
+            </a>
+            <a
+              href="#videos"
+              class="rounded-full border border-emerald-400/60 px-6 py-3 text-sm font-semibold text-emerald-300 transition hover:-translate-y-0.5 hover:border-emerald-300 hover:text-emerald-200"
+            >
+              Ver videos educativos
+            </a>
+          </div>
+        </div>
+        <div class="rounded-3xl border border-slate-800 bg-slate-900 p-6 shadow-xl">
+          <h2 class="mb-4 text-lg font-semibold">Resumen rápido</h2>
+          <ul class="space-y-3 text-sm text-slate-300">
+            <li>✔️ Generación automática de planos 2D y 3D</li>
+            <li>✔️ Manual constructivo interactivo con videos</li>
+            <li>✔️ Arquitectos verificados y proveedores locales</li>
+            <li>✔️ Simulador de financiamiento</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="mi-proyecto" class="space-y-6">
+        <div class="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h2 class="text-3xl font-bold">Define tu proyecto</h2>
+            <p class="text-slate-300">Responde unas cuantas preguntas y generaremos un plan personalizado.</p>
+          </div>
+          <button
+            id="loadOfflineProject"
+            class="text-sm text-emerald-300 hover:text-emerald-200"
+          >
+            Recuperar último proyecto offline
+          </button>
+        </div>
+        <form id="projectForm" class="grid gap-6 rounded-3xl border border-slate-800 bg-slate-900 p-8 shadow-xl">
+          <div class="grid gap-6 md:grid-cols-3">
+            <label class="flex flex-col text-sm">
+              Presupuesto disponible
+              <select name="presupuesto" class="input-field" required>
+                <option value="">Selecciona</option>
+                <option value="150000">$150,000</option>
+                <option value="250000">$250,000</option>
+                <option value="350000">$350,000</option>
+                <option value="500000">$500,000</option>
+                <option value="650000">$650,000</option>
+                <option value="800000">$800,000</option>
+              </select>
+            </label>
+            <label class="flex flex-col text-sm">
+              Largo del terreno (m)
+              <select name="largo_terreno" class="input-field" required>
+                <option value="">Selecciona</option>
+                <option value="15">15</option>
+                <option value="18">18</option>
+                <option value="20">20</option>
+                <option value="25">25</option>
+                <option value="30">30</option>
+              </select>
+            </label>
+            <label class="flex flex-col text-sm">
+              Ancho del terreno (m)
+              <select name="ancho_terreno" class="input-field" required>
+                <option value="">Selecciona</option>
+                <option value="6">6</option>
+                <option value="8">8</option>
+                <option value="10">10</option>
+                <option value="12">12</option>
+                <option value="15">15</option>
+              </select>
+            </label>
+            <label class="flex flex-col text-sm">
+              Ciudad / Localidad
+              <select name="ciudad" class="input-field" required>
+                <option value="">Selecciona</option>
+                <option>Ciudad de México</option>
+                <option>Guadalajara</option>
+                <option>Monterrey</option>
+                <option>Mérida</option>
+                <option>Puebla</option>
+                <option>Querétaro</option>
+              </select>
+            </label>
+            <label class="flex flex-col text-sm">
+              Tipo de clima
+              <select name="clima" class="input-field" required>
+                <option value="">Selecciona</option>
+                <option>templado</option>
+                <option>cálido</option>
+                <option>húmedo</option>
+                <option>seco</option>
+              </select>
+            </label>
+            <label class="flex flex-col text-sm">
+              Material principal
+              <select name="material" class="input-field" required>
+                <option value="">Selecciona</option>
+                <option>concreto</option>
+                <option>block</option>
+                <option>madera</option>
+                <option>adobe</option>
+              </select>
+            </label>
+            <label class="flex flex-col text-sm">
+              Número de personas en la familia
+              <select name="personas" class="input-field" required>
+                <option value="">Selecciona</option>
+                <option>2</option>
+                <option>3</option>
+                <option>4</option>
+                <option>5</option>
+                <option>6</option>
+                <option>7</option>
+              </select>
+            </label>
+            <label class="flex flex-col text-sm">
+              Número de plantas
+              <select name="plantas" class="input-field" required>
+                <option value="">Selecciona</option>
+                <option>1</option>
+                <option>2</option>
+              </select>
+            </label>
+            <fieldset class="flex flex-col gap-3 text-sm md:col-span-3">
+              <legend class="font-semibold">Necesidades especiales</legend>
+              <div class="flex flex-wrap gap-4">
+                <label class="chip"><input type="checkbox" name="necesidades" value="accesibilidad" />Accesibilidad</label>
+                <label class="chip"><input type="checkbox" name="necesidades" value="taller" />Taller</label>
+                <label class="chip"><input type="checkbox" name="necesidades" value="negocio familiar" />Negocio familiar</label>
+                <label class="chip"><input type="checkbox" name="necesidades" value="rampa" />Rampa</label>
+                <label class="chip"><input type="checkbox" name="necesidades" value="jardín" />Jardín</label>
+              </div>
+            </fieldset>
+            <fieldset class="flex flex-col gap-3 text-sm md:col-span-3">
+              <legend class="font-semibold">Preferencias</legend>
+              <div class="flex flex-wrap gap-4">
+                <label class="chip"><input type="checkbox" name="preferencias" value="ventilación natural" />Ventilación natural</label>
+                <label class="chip"><input type="checkbox" name="preferencias" value="iluminación" />Iluminación</label>
+                <label class="chip"><input type="checkbox" name="preferencias" value="bajo mantenimiento" />Bajo mantenimiento</label>
+              </div>
+            </fieldset>
+            <fieldset class="flex flex-col gap-3 text-sm md:col-span-3">
+              <legend class="font-semibold">Espacios deseados</legend>
+              <div class="grid gap-3 md:grid-cols-3">
+                <label class="chip"><input type="checkbox" name="espacios" value="cocina" />Cocina</label>
+                <label class="chip"><input type="checkbox" name="espacios" value="baño" />Baño</label>
+                <label class="chip"><input type="checkbox" name="espacios" value="recámara" />Recámara</label>
+                <label class="chip"><input type="checkbox" name="espacios" value="patio" />Patio</label>
+                <label class="chip"><input type="checkbox" name="espacios" value="sala" />Sala</label>
+                <label class="chip"><input type="checkbox" name="espacios" value="comedor" />Comedor</label>
+                <label class="chip"><input type="checkbox" name="espacios" value="área de lavado" />Área de lavado</label>
+                <label class="chip"><input type="checkbox" name="espacios" value="cochera" />Cochera</label>
+                <label class="chip"><input type="checkbox" name="espacios" value="estudio" />Estudio</label>
+                <label class="chip"><input type="checkbox" name="espacios" value="terraza" />Terraza</label>
+              </div>
+            </fieldset>
+          </div>
+          <div class="flex flex-col gap-4 md:flex-row">
+            <button type="submit" class="action-button">Generar proyecto</button>
+            <a id="downloadManual" class="action-secondary" href="#">Descargar manual PDF</a>
+            <button type="button" id="contactArchitect" class="action-secondary">Contactar arquitecto</button>
+          </div>
+        </form>
+        <div id="projectResults" class="hidden space-y-8">
+          <div class="rounded-3xl border border-slate-800 bg-slate-900 p-8">
+            <div class="flex flex-wrap items-center justify-between gap-4">
+              <h3 class="text-2xl font-bold">Resultados del Proyecto</h3>
+              <span id="viabilityScore" class="rounded-full bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-300"></span>
+            </div>
+            <div class="mt-6 grid gap-6 md:grid-cols-2">
+              <div>
+                <h4 class="font-semibold uppercase tracking-wider text-xs text-emerald-400">Plano 2D</h4>
+                <div class="mt-3 rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+                  <pre id="blueprint2D" class="overflow-x-auto text-xs text-emerald-300"></pre>
+                </div>
+              </div>
+              <div>
+                <h4 class="font-semibold uppercase tracking-wider text-xs text-emerald-400">Plano 3D</h4>
+                <div class="mt-3 space-y-3 rounded-2xl border border-slate-800 bg-slate-950/40 p-4 text-sm text-slate-300" id="blueprint3D"></div>
+              </div>
+            </div>
+            <div class="mt-8 grid gap-6 md:grid-cols-2">
+              <div>
+                <h4 class="font-semibold uppercase tracking-wider text-xs text-emerald-400">Manual paso a paso</h4>
+                <ol id="manualSteps" class="mt-3 space-y-4 text-sm text-slate-300"></ol>
+              </div>
+              <div>
+                <h4 class="font-semibold uppercase tracking-wider text-xs text-emerald-400">Materiales y costos</h4>
+                <ul id="materialList" class="mt-3 space-y-3 text-sm text-slate-300"></ul>
+                <div id="estimatedCost" class="mt-4 text-lg font-semibold text-emerald-300"></div>
+              </div>
+            </div>
+            <div class="mt-8">
+              <h4 class="font-semibold uppercase tracking-wider text-xs text-emerald-400">Alertas clave</h4>
+              <ul id="alertList" class="mt-3 list-disc space-y-2 pl-5 text-sm text-amber-300"></ul>
+            </div>
+          </div>
+
+          <div class="rounded-3xl border border-slate-800 bg-slate-900 p-8">
+            <h4 class="text-xl font-semibold">Opciones generadas por IA</h4>
+            <div id="planOptions" class="mt-4 grid gap-4 md:grid-cols-3"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="manual" class="space-y-6">
+        <div class="flex items-center justify-between">
+          <h2 class="text-3xl font-bold">Manual constructivo</h2>
+          <button id="refreshManual" class="action-secondary">Generar manual</button>
+        </div>
+        <div id="manualLevels" class="grid gap-4 md:grid-cols-2"></div>
+      </section>
+
+      <section id="videos" class="space-y-6">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 class="text-3xl font-bold">Videos educativos</h2>
+            <p class="text-slate-300">Filtra por categoría o busca por tema.</p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <select id="videoCategory" class="input-field">
+              <option value="">Todas las categorías</option>
+              <option value="estructura">Estructura</option>
+              <option value="electricidad">Electricidad</option>
+              <option value="drenaje">Drenaje</option>
+              <option value="ventilacion">Ventilación</option>
+              <option value="acabados">Acabados</option>
+            </select>
+            <input id="videoSearch" type="search" placeholder="Buscar video" class="input-field" />
+          </div>
+        </div>
+        <div id="videoList" class="grid gap-6 md:grid-cols-2"></div>
+      </section>
+
+      <section id="marketplace" class="space-y-10">
+        <h2 class="text-3xl font-bold">Marketplace</h2>
+        <div class="grid gap-6 md:grid-cols-2">
+          <div class="rounded-3xl border border-slate-800 bg-slate-900 p-8">
+            <div class="flex items-center justify-between">
+              <h3 class="text-xl font-semibold">Arquitectos verificados</h3>
+              <button id="filterArchitects" class="text-sm text-emerald-300">Ver todos</button>
+            </div>
+            <div id="architectList" class="mt-4 space-y-4"></div>
+          </div>
+          <div class="rounded-3xl border border-slate-800 bg-slate-900 p-8">
+            <div class="flex items-center justify-between">
+              <h3 class="text-xl font-semibold">Proveedores locales</h3>
+              <button id="filterSuppliers" class="text-sm text-emerald-300">Ver todos</button>
+            </div>
+            <div id="supplierList" class="mt-4 space-y-4"></div>
+          </div>
+        </div>
+        <div class="overflow-hidden rounded-3xl border border-slate-800">
+          <div id="supplierMap" class="h-80 w-full"></div>
+        </div>
+      </section>
+
+      <section id="financiamiento" class="space-y-6">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+          <h2 class="text-3xl font-bold">Financiamiento</h2>
+          <div class="flex gap-2">
+            <select id="financingType" class="input-field">
+              <option value="">Todos los productos</option>
+              <option value="Hipotecario">Hipotecario</option>
+              <option value="Microfinanzas">Microfinanzas</option>
+              <option value="Hipotecario verde">Hipotecario verde</option>
+            </select>
+            <button id="refreshFinancing" class="action-secondary">Buscar</button>
+          </div>
+        </div>
+        <div class="grid gap-6 md:grid-cols-2" id="financingList"></div>
+        <div class="rounded-3xl border border-slate-800 bg-slate-900 p-8">
+          <h3 class="text-xl font-semibold">Simular préstamo</h3>
+          <form id="financeSimulator" class="mt-4 grid gap-4 md:grid-cols-4">
+            <input type="number" name="amount" placeholder="Monto" class="input-field" required />
+            <input type="number" name="months" placeholder="Plazo (meses)" class="input-field" required />
+            <input type="number" step="0.1" name="rate" placeholder="Tasa anual (%)" class="input-field" required />
+            <button type="submit" class="action-button">Simular</button>
+          </form>
+          <div id="financeResult" class="mt-4 text-sm text-slate-300"></div>
+        </div>
+      </section>
+
+      <section class="space-y-6">
+        <h2 class="text-3xl font-bold">Testimonios</h2>
+        <div id="testimonialList" class="grid gap-4 md:grid-cols-3"></div>
+      </section>
+    </main>
+
+    <footer class="border-t border-slate-800 bg-slate-900/70 py-6">
+      <div class="mx-auto flex max-w-6xl flex-col gap-3 px-6 text-sm text-slate-400 md:flex-row md:items-center md:justify-between">
+        <span>© ConstruyeSeguro 2024</span>
+        <div class="flex gap-4">
+          <a href="#manual" class="hover:text-emerald-300">Manual</a>
+          <a href="#marketplace" class="hover:text-emerald-300">Marketplace</a>
+          <a href="#financiamiento" class="hover:text-emerald-300">Financiamiento</a>
+        </div>
+      </div>
+    </footer>
+
+    <script src="/js/offline.js" type="module"></script>
+    <script src="/js/app.js" type="module"></script>
+  </body>
+</html>
