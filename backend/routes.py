@@ -6,7 +6,7 @@ from functools import wraps
 from http import HTTPStatus
 from pathlib import Path
 
-from flask import Blueprint, Response, current_app, g, jsonify, request, send_file
+from flask import Blueprint, Response, current_app, g, jsonify, make_response, request, send_file
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import database
@@ -14,6 +14,9 @@ from .services import financing, manual_builder, plan_generator, youtube_service
 from .validation import validate_project_payload
 
 api_bp = Blueprint("api", __name__)
+
+SESSION_COOKIE_NAME = "cs_session"
+SESSION_COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
 
 
 # ---------------------------------------------------------------------------
@@ -23,7 +26,33 @@ def _extract_token() -> str:
     header = request.headers.get("Authorization", "")
     if header.lower().startswith("bearer "):
         return header.split(" ", 1)[1]
-    return request.cookies.get("auth_token", "")
+    return request.cookies.get(SESSION_COOKIE_NAME, "")
+
+
+def _set_session_cookie(response: Response, token: str) -> None:
+    secure_cookie = current_app.config.get("SESSION_COOKIE_SECURE", False)
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        max_age=SESSION_COOKIE_MAX_AGE,
+        httponly=True,
+        secure=secure_cookie,
+        samesite="Lax",
+        path="/",
+    )
+
+
+def _clear_session_cookie(response: Response) -> None:
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        "",
+        expires=0,
+        max_age=0,
+        httponly=True,
+        secure=current_app.config.get("SESSION_COOKIE_SECURE", False),
+        samesite="Lax",
+        path="/",
+    )
 
 
 def require_auth(handler):
@@ -32,7 +61,10 @@ def require_auth(handler):
         token = _extract_token()
         user = database.get_user_by_token(token)
         if not user:
-            return jsonify({"error": "Autenticación requerida"}), HTTPStatus.UNAUTHORIZED
+            return (
+                jsonify({"success": False, "error": "Autenticación requerida"}),
+                HTTPStatus.UNAUTHORIZED,
+            )
         g.current_user = user
         g.auth_token = token
         return handler(*args, **kwargs)
@@ -43,69 +75,115 @@ def require_auth(handler):
 # ---------------------------------------------------------------------------
 # Auth routes
 # ---------------------------------------------------------------------------
+@api_bp.post("/register")
 @api_bp.post("/auth/register")
-def register() -> tuple[Response, int]:
+def register() -> Response:
     payload = request.get_json(force=True, silent=True) or {}
     email = (payload.get("email") or "").strip().lower()
     password = payload.get("password") or ""
     full_name = (payload.get("full_name") or "").strip() or None
+    city = (payload.get("city") or "").strip() or None
+    project_type = (payload.get("project_type") or "").strip() or None
 
     if not email or "@" not in email:
-        return jsonify({"error": "Correo electrónico inválido"}), HTTPStatus.BAD_REQUEST
+        return (
+            jsonify({"success": False, "error": "Correo electrónico inválido"}),
+            HTTPStatus.BAD_REQUEST,
+        )
     if len(password) < 8:
-        return jsonify({"error": "La contraseña debe tener al menos 8 caracteres"}), HTTPStatus.BAD_REQUEST
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "La contraseña debe tener al menos 8 caracteres",
+                }
+            ),
+            HTTPStatus.BAD_REQUEST,
+        )
     if database.get_user_by_email(email):
-        return jsonify({"error": "Ya existe una cuenta con ese correo"}), HTTPStatus.CONFLICT
+        return (
+            jsonify({"success": False, "error": "Ya existe una cuenta con ese correo"}),
+            HTTPStatus.CONFLICT,
+        )
 
     password_hash = generate_password_hash(password)
-    user_id = database.create_user(email, password_hash, full_name)
+    user_id = database.create_user(
+        email,
+        password_hash,
+        full_name,
+        city=city,
+        project_type=project_type,
+    )
     token = secrets.token_urlsafe(32)
     database.create_session(token, user_id)
 
-    return (
+    response = make_response(
         jsonify(
             {
+                "success": True,
+                "message": "Cuenta creada correctamente",
                 "token": token,
-                "user": {"id": user_id, "email": email, "full_name": full_name},
+                "user": {
+                    "id": user_id,
+                    "email": email,
+                    "full_name": full_name,
+                    "city": city,
+                    "project_type": project_type,
+                },
             }
         ),
         HTTPStatus.CREATED,
     )
+    _set_session_cookie(response, token)
+    return response
 
 
+@api_bp.post("/login")
 @api_bp.post("/auth/login")
-def login() -> tuple[Response, int]:
+def login() -> Response:
     payload = request.get_json(force=True, silent=True) or {}
     email = (payload.get("email") or "").strip().lower()
     password = payload.get("password") or ""
 
     user = database.get_user_by_email(email)
     if not user or not check_password_hash(user["password_hash"], password):
-        return jsonify({"error": "Credenciales inválidas"}), HTTPStatus.UNAUTHORIZED
+        return (
+            jsonify({"success": False, "error": "Credenciales inválidas"}),
+            HTTPStatus.UNAUTHORIZED,
+        )
 
     token = secrets.token_urlsafe(32)
     database.create_session(token, int(user["id"]))
 
-    return (
+    response = make_response(
         jsonify(
             {
+                "success": True,
+                "message": "Sesión iniciada",
                 "token": token,
                 "user": {
                     "id": int(user["id"]),
                     "email": user["email"],
                     "full_name": user.get("full_name"),
+                    "city": user.get("city"),
+                    "project_type": user.get("project_type"),
                 },
             }
         ),
         HTTPStatus.OK,
     )
+    _set_session_cookie(response, token)
+    return response
 
 
+@api_bp.post("/logout")
 @api_bp.post("/auth/logout")
 @require_auth
-def logout() -> tuple[Response, int]:
+def logout() -> Response:
     database.revoke_session(g.auth_token)
-    return jsonify({"status": "Sesión cerrada"}), HTTPStatus.OK
+    response = make_response(jsonify({"success": True, "message": "Sesión cerrada"}), HTTPStatus.OK)
+    _clear_session_cookie(response)
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -121,10 +199,51 @@ def list_projects() -> Response:
     video_progress = round(len(watched_ids) / total_videos, 2)
 
     for project in projects:
+        manual = (project.get("plan_data") or {}).get("manual") or {}
+        if "recommended_videos" not in manual:
+            manual["recommended_videos"] = youtube_service.recommended_videos_for_project(
+                project.get("form_data", {})
+            )
+            project.setdefault("plan_data", {})["manual"] = manual
         project["video_progress"] = video_progress
         project["videos_watched"] = len(watched_ids)
         project["total_videos"] = total_videos
-    return jsonify({"projects": projects})
+    return jsonify({"success": True, "projects": projects})
+
+
+@api_bp.get("/dashboard")
+@require_auth
+def dashboard() -> Response:
+    user_id = int(g.current_user["id"])
+    projects = database.list_user_projects(user_id)
+    watched_ids = database.get_watched_video_ids(user_id)
+    total_videos = max(database.total_videos(), 1)
+    progress = round(len(watched_ids) / total_videos, 2)
+    recommended = youtube_service.recommended_videos_for_user(
+        g.current_user,
+        projects,
+        watched_ids,
+    )
+
+    return jsonify(
+        {
+            "success": True,
+            "user": {
+                "id": g.current_user["id"],
+                "email": g.current_user["email"],
+                "full_name": g.current_user.get("full_name"),
+                "city": g.current_user.get("city"),
+                "project_type": g.current_user.get("project_type"),
+            },
+            "projects": projects,
+            "progress": {
+                "videos_watched": len(watched_ids),
+                "total_videos": total_videos,
+                "percentage": progress,
+            },
+            "recommended_videos": recommended,
+        }
+    )
 
 
 @api_bp.post("/projects")
@@ -152,6 +271,8 @@ def create_project() -> tuple[Response, int]:
 
     generated["project_id"] = project_id
     generated["manual_url"] = f"/api/projects/{project_id}/manual/pdf"
+    generated["success"] = True
+    generated["message"] = "Proyecto generado correctamente"
 
     return jsonify(generated), HTTPStatus.CREATED
 
@@ -162,12 +283,19 @@ def get_project(project_id: int) -> tuple[Response, int]:
     user_id = int(g.current_user["id"])
     project = database.get_user_project(project_id, user_id)
     if project is None:
-        return jsonify({"error": "Proyecto no encontrado"}), HTTPStatus.NOT_FOUND
+        return jsonify({"success": False, "error": "Proyecto no encontrado"}), HTTPStatus.NOT_FOUND
     watched_ids = database.get_watched_video_ids(user_id)
     total_videos = max(database.total_videos(), 1)
     project["video_progress"] = round(len(watched_ids) / total_videos, 2)
     project["videos_watched"] = len(watched_ids)
     project["total_videos"] = total_videos
+    manual = (project.get("plan_data") or {}).get("manual") or {}
+    if "recommended_videos" not in manual:
+        manual["recommended_videos"] = youtube_service.recommended_videos_for_project(
+            project.get("form_data", {})
+        )
+        project.setdefault("plan_data", {})["manual"] = manual
+    project["success"] = True
     return jsonify(project), HTTPStatus.OK
 
 
@@ -177,7 +305,7 @@ def download_manual(project_id: int):
     user_id = int(g.current_user["id"])
     project = database.get_user_project(project_id, user_id)
     if project is None:
-        return jsonify({"error": "Proyecto no encontrado"}), HTTPStatus.NOT_FOUND
+        return jsonify({"success": False, "error": "Proyecto no encontrado"}), HTTPStatus.NOT_FOUND
 
     manual_path = Path(project.get("manual_path") or "")
     storage_dir: Path = current_app.config["PROJECT_STORAGE"]
@@ -196,6 +324,7 @@ def preview_plan() -> Response:
     payload = request.get_json(force=True, silent=True) or {}
     project_data = validate_project_payload(payload)
     generated = plan_generator.generate_project_package(project_data)
+    generated["success"] = True
     return jsonify(generated)
 
 
@@ -221,7 +350,7 @@ def list_videos() -> Response:
     watched_ids = database.get_watched_video_ids(int(g.current_user["id"]))
     for row in rows:
         row["watched"] = row.get("id") in watched_ids
-    return jsonify({"videos": rows})
+    return jsonify({"success": True, "videos": rows})
 
 
 @api_bp.post("/videos/<int:video_id>/watch")
@@ -231,7 +360,17 @@ def track_video(video_id: int) -> tuple[Response, int]:
     watched = len(database.get_watched_video_ids(int(g.current_user["id"])))
     total = max(database.total_videos(), 1)
     progress = round(watched / total, 2)
-    return jsonify({"progress": progress, "watched": watched, "total": total}), HTTPStatus.CREATED
+    return (
+        jsonify(
+            {
+                "success": True,
+                "progress": progress,
+                "watched": watched,
+                "total": total,
+            }
+        ),
+        HTTPStatus.CREATED,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +381,7 @@ def track_video(video_id: int) -> tuple[Response, int]:
 def manual_steps() -> Response:
     level = request.args.get("level")
     steps = manual_builder.build_manual_steps(level_filter=level)
-    return jsonify({"steps": steps})
+    return jsonify({"success": True, "steps": steps})
 
 
 @api_bp.get("/marketplace/architects")
@@ -259,7 +398,7 @@ def list_architects() -> Response:
         """,
         (city, city, specialty, specialty),
     )
-    return jsonify({"architects": architects})
+    return jsonify({"success": True, "architects": architects})
 
 
 @api_bp.get("/marketplace/suppliers")
@@ -276,7 +415,7 @@ def list_suppliers() -> Response:
         """,
         (city, city, material, material),
     )
-    return jsonify({"suppliers": suppliers})
+    return jsonify({"success": True, "suppliers": suppliers})
 
 
 @api_bp.get("/marketplace/alerts")
@@ -286,20 +425,20 @@ def safety_alerts() -> Response:
         "Verifica que el contratista cuente con equipo de seguridad personal (EPP).",
         "Coordina con vecinos horarios de obra para minimizar molestias.",
     ]
-    return jsonify({"alerts": alerts})
+    return jsonify({"success": True, "alerts": alerts})
 
 
 @api_bp.get("/testimonials")
 def testimonials() -> Response:
     rows = database.fetch_rows("SELECT author, location, quote FROM testimonials")
-    return jsonify({"testimonials": rows})
+    return jsonify({"success": True, "testimonials": rows})
 
 
 @api_bp.get("/financing/products")
 def financing_products() -> Response:
     product_type = request.args.get("type")
     products = financing.get_financing_products(product_type=product_type)
-    return jsonify({"products": products})
+    return jsonify({"success": True, "products": products})
 
 
 @api_bp.get("/financing/simulate")
@@ -308,6 +447,7 @@ def simulate_financing() -> Response:
     months = int(request.args.get("months", 0))
     rate = float(request.args.get("rate", 0))
     simulation = financing.simulate_payment_plan(amount=amount, months=months, rate=rate)
+    simulation["success"] = True
     return jsonify(simulation)
 
 
@@ -316,10 +456,13 @@ def simulate_financing() -> Response:
 # ---------------------------------------------------------------------------
 @api_bp.errorhandler(ValueError)
 def handle_validation_error(exc: ValueError) -> tuple[Response, int]:
-    return jsonify({"error": str(exc)}), HTTPStatus.BAD_REQUEST
+    return jsonify({"success": False, "error": str(exc)}), HTTPStatus.BAD_REQUEST
 
 
 @api_bp.errorhandler(Exception)
 def handle_generic_error(exc: Exception) -> tuple[Response, int]:
     current_app.logger.exception("Unhandled error: %s", exc)
-    return jsonify({"error": "Ocurrió un error inesperado"}), HTTPStatus.INTERNAL_SERVER_ERROR
+    return (
+        jsonify({"success": False, "error": "Ocurrió un error inesperado"}),
+        HTTPStatus.INTERNAL_SERVER_ERROR,
+    )

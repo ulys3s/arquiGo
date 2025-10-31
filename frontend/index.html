@@ -103,6 +103,12 @@
             Recuperar último proyecto offline
           </button>
         </div>
+        <p
+          id="authWarning"
+          class="hidden rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200"
+        >
+          Autenticación requerida. Inicia sesión o crea una cuenta para generar tu proyecto personalizado.
+        </p>
         <form id="projectForm" class="grid gap-6 rounded-3xl border border-slate-800 bg-slate-900 p-8 shadow-xl">
           <div class="grid gap-6 md:grid-cols-3">
             <label class="flex flex-col text-sm">
@@ -275,6 +281,10 @@
               <div>
                 <h4 class="font-semibold uppercase tracking-wider text-xs text-emerald-400">Manual paso a paso</h4>
                 <ol id="manualSteps" class="mt-3 space-y-4 text-sm text-slate-300"></ol>
+                <div class="mt-6">
+                  <h5 class="text-xs uppercase tracking-wider text-emerald-200">Videos recomendados por etapa</h5>
+                  <div id="manualRecommended" class="mt-3 space-y-4 text-sm text-slate-300"></div>
+                </div>
               </div>
               <div class="space-y-4">
                 <h4 class="font-semibold uppercase tracking-wider text-xs text-emerald-400">Materiales y costos</h4>
@@ -309,6 +319,10 @@
               <p id="projectProgressText" class="mt-2 text-xs uppercase tracking-wider text-emerald-200">0%</p>
             </div>
             <div id="projectList" class="mt-6 grid gap-4 md:grid-cols-2"></div>
+            <div class="mt-6">
+              <h5 class="text-xs uppercase tracking-wider text-emerald-200">Recomendaciones para tu avance</h5>
+              <div id="dashboardRecommendations" class="mt-3 space-y-3 text-sm text-slate-300"></div>
+            </div>
           </div>
         </div>
       </section>
@@ -442,6 +456,28 @@
               <label class="block text-sm">
                 Contraseña
                 <input type="password" name="password" class="input-field mt-1" required minlength="8" />
+              </label>
+              <label class="block text-sm">
+                Ciudad principal del proyecto
+                <select name="city" class="input-field mt-1">
+                  <option value="">Selecciona</option>
+                  <option>Ciudad de México</option>
+                  <option>Guadalajara</option>
+                  <option>Monterrey</option>
+                  <option>Puebla</option>
+                  <option>Mérida</option>
+                  <option>Querétaro</option>
+                </select>
+              </label>
+              <label class="block text-sm">
+                Tipo de proyecto
+                <select name="project_type" class="input-field mt-1">
+                  <option value="">Selecciona</option>
+                  <option value="vivienda nueva">Vivienda nueva</option>
+                  <option value="ampliación">Ampliación</option>
+                  <option value="remodelación">Remodelación</option>
+                  <option value="mejoras progresivas">Mejoras progresivas</option>
+                </select>
               </label>
               <button type="submit" class="action-secondary w-full">Registrarme</button>
             </form>
