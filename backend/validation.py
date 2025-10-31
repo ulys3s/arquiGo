@@ -15,10 +15,17 @@ ALLOWED_VALUES = {
         "Puebla",
         "Querétaro",
     ],
+    "localidad": [
+        "Iztapalapa",
+        "Tonalá",
+        "Centro",
+        "Cholula",
+        "San Pedro",
+    ],
     "clima": ["templado", "cálido", "húmedo", "seco"],
     "material": ["concreto", "block", "madera", "adobe"],
     "personas": [2, 3, 4, 5, 6, 7],
-    "plantas": [1, 2],
+    "plantas": [1, 2, 3],
     "necesidades": [
         "accesibilidad",
         "taller",
@@ -26,7 +33,13 @@ ALLOWED_VALUES = {
         "rampa",
         "jardín",
     ],
-    "preferencias": ["ventilación natural", "iluminación", "bajo mantenimiento"],
+    "preferencias": [
+        "ventilación natural",
+        "iluminación natural",
+        "energía solar",
+        "captación de agua",
+        "bajo mantenimiento",
+    ],
     "espacios": [
         "cocina",
         "baño",
@@ -38,6 +51,8 @@ ALLOWED_VALUES = {
         "cochera",
         "estudio",
         "terraza",
+        "baño completo",
+        "recámara principal",
     ],
 }
 
@@ -46,6 +61,7 @@ REQUIRED_FIELDS = [
     "largo_terreno",
     "ancho_terreno",
     "ciudad",
+    "localidad",
     "clima",
     "material",
     "personas",

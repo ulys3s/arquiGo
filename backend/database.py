@@ -12,6 +12,7 @@ DB_PATH = Path(__file__).resolve().parent.parent / "construyeseguro.db"
 def get_connection() -> sqlite3.Connection:
     connection = sqlite3.connect(DB_PATH)
     connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
     return connection
 
 
@@ -20,6 +21,55 @@ def init_db() -> None:
     with get_connection() as connection:
         connection.executescript(
             """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                full_name TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS sessions (
+                token TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS user_projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                form_data TEXT NOT NULL,
+                plan_data TEXT NOT NULL,
+                viability REAL NOT NULL,
+                manual_path TEXT,
+                status TEXT NOT NULL DEFAULT 'En preparación',
+                progress REAL NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS video_watch_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                video_id INTEGER NOT NULL,
+                watched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, video_id),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS manual_downloads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                project_id INTEGER NOT NULL,
+                downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (project_id) REFERENCES user_projects(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS projects (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 form_data TEXT NOT NULL,
@@ -66,7 +116,8 @@ def init_db() -> None:
                 category TEXT NOT NULL,
                 youtube_id TEXT NOT NULL,
                 level TEXT NOT NULL,
-                description TEXT NOT NULL
+                description TEXT NOT NULL,
+                manual_step TEXT
             );
 
             CREATE TABLE IF NOT EXISTS testimonials (
@@ -193,44 +244,49 @@ def seed_data() -> None:
         if not _has_rows(connection, "videos"):
             connection.executemany(
                 """
-                INSERT INTO videos (title, category, youtube_id, level, description)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO videos (title, category, youtube_id, level, description, manual_step)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
                         "Cómo trazar cimientos seguros",
                         "cimientos",
                         "dQw4w9WgXcQ",
-                        "nivel_1",
+                        "principiante",
                         "Aprende a preparar el terreno y trazar cimientos resistentes.",
+                        "preparacion_terreno",
                     ),
                     (
                         "Muros de block paso a paso",
                         "estructura",
                         "V-_O7nl0Ii0",
-                        "nivel_2",
+                        "intermedio",
                         "Técnicas para levantar muros rectos y alineados.",
+                        "levantamiento_muros",
                     ),
                     (
                         "Instalaciones eléctricas seguras",
-                        "electricidad",
+                        "instalaciones",
                         "iik25wqIuFo",
-                        "nivel_3",
+                        "intermedio",
                         "Recomendaciones para cableado seguro en viviendas familiares.",
+                        "instalaciones_seguras",
                     ),
                     (
                         "Acabados que duran",
                         "acabados",
                         "N3AkSS5hXMA",
-                        "nivel_4",
+                        "avanzado",
                         "Consejos para aplicar acabados y pintura de larga duración.",
+                        "acabados_finales",
                     ),
                     (
                         "Ventilación natural efectiva",
                         "ventilacion",
                         "L_jWHffIx5E",
-                        "general",
+                        "principiante",
                         "Diseña aperturas y ductos para una ventilación pasiva.",
+                        "ventilacion_iluminacion",
                     ),
                 ],
             )
@@ -259,6 +315,198 @@ def seed_data() -> None:
                     ),
                 ],
             )
+
+
+def create_user(email: str, password_hash: str, full_name: str | None = None) -> int:
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO users (email, password_hash, full_name)
+            VALUES (?, ?, ?)
+            """,
+            (email.lower(), password_hash, full_name),
+        )
+        return int(cursor.lastrowid)
+
+
+def get_user_by_email(email: str) -> dict[str, Any] | None:
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT id, email, password_hash, full_name, created_at FROM users WHERE email = ?",
+            (email.lower(),),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_user_by_id(user_id: int) -> dict[str, Any] | None:
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT id, email, full_name, created_at FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def create_session(token: str, user_id: int) -> None:
+    with get_connection() as connection:
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO sessions (token, user_id)
+            VALUES (?, ?)
+            """,
+            (token, user_id),
+        )
+
+
+def get_user_by_token(token: str) -> dict[str, Any] | None:
+    if not token:
+        return None
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT users.id, users.email, users.full_name
+            FROM sessions
+            JOIN users ON users.id = sessions.user_id
+            WHERE sessions.token = ?
+            """,
+            (token,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def revoke_session(token: str) -> None:
+    with get_connection() as connection:
+        connection.execute("DELETE FROM sessions WHERE token = ?", (token,))
+
+
+def create_user_project(
+    user_id: int,
+    title: str,
+    form_data: dict[str, Any],
+    plan_data: dict[str, Any],
+    viability: float,
+    manual_path: str | None = None,
+    status: str = "En preparación",
+) -> int:
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO user_projects (user_id, title, form_data, plan_data, viability, manual_path, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                title,
+                json.dumps(form_data),
+                json.dumps(plan_data),
+                viability,
+                manual_path,
+                status,
+            ),
+        )
+        return int(cursor.lastrowid)
+
+
+def update_project_progress(project_id: int, *, progress: float | None = None, status: str | None = None) -> None:
+    assignments: list[str] = []
+    params: list[Any] = []
+    if progress is not None:
+        assignments.append("progress = ?")
+        params.append(progress)
+    if status is not None:
+        assignments.append("status = ?")
+        params.append(status)
+    if not assignments:
+        return
+    params.append(project_id)
+    with get_connection() as connection:
+        connection.execute(
+            f"UPDATE user_projects SET {', '.join(assignments)}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            tuple(params),
+        )
+
+
+def set_project_manual_path(project_id: int, manual_path: str) -> None:
+    with get_connection() as connection:
+        connection.execute(
+            "UPDATE user_projects SET manual_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (manual_path, project_id),
+        )
+
+
+def list_user_projects(user_id: int) -> list[dict[str, Any]]:
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """
+            SELECT id, title, form_data, plan_data, viability, manual_path, status, progress, created_at, updated_at
+            FROM user_projects
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            """,
+            (user_id,),
+        )
+        projects: list[dict[str, Any]] = []
+        for row in cursor.fetchall():
+            project = dict(row)
+            project["form_data"] = json.loads(project["form_data"])
+            project["plan_data"] = json.loads(project["plan_data"])
+            projects.append(project)
+        return projects
+
+
+def get_user_project(project_id: int, user_id: int) -> dict[str, Any] | None:
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT id, title, form_data, plan_data, viability, manual_path, status, progress, created_at, updated_at
+            FROM user_projects
+            WHERE id = ? AND user_id = ?
+            """,
+            (project_id, user_id),
+        ).fetchone()
+    if row is None:
+        return None
+    project = dict(row)
+    project["form_data"] = json.loads(project["form_data"])
+    project["plan_data"] = json.loads(project["plan_data"])
+    return project
+
+
+def record_video_watch(user_id: int, video_id: int) -> None:
+    with get_connection() as connection:
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO video_watch_history (user_id, video_id)
+            VALUES (?, ?)
+            """,
+            (user_id, video_id),
+        )
+
+
+def get_watched_video_ids(user_id: int) -> set[int]:
+    with get_connection() as connection:
+        cursor = connection.execute(
+            "SELECT video_id FROM video_watch_history WHERE user_id = ?",
+            (user_id,),
+        )
+        return {row["video_id"] for row in cursor.fetchall()}
+
+
+def total_videos() -> int:
+    with get_connection() as connection:
+        (count,) = connection.execute("SELECT COUNT(*) FROM videos").fetchone()
+    return int(count)
+
+
+def record_manual_download(user_id: int, project_id: int) -> None:
+    with get_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO manual_downloads (user_id, project_id)
+            VALUES (?, ?)
+            """,
+            (user_id, project_id),
+        )
 
 
 def save_project(

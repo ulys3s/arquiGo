@@ -36,12 +36,21 @@
           <a href="#marketplace" class="hover:text-emerald-400">Marketplace</a>
           <a href="#financiamiento" class="hover:text-emerald-400">Financiamiento</a>
         </nav>
-        <button
-          id="assistanceButton"
-          class="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-emerald-400"
-        >
-          Asistencia inmediata
-        </button>
+        <div class="flex items-center gap-3">
+          <span id="userName" class="hidden text-sm text-emerald-200"></span>
+          <button
+            data-open-login
+            class="rounded-full border border-emerald-400/70 px-4 py-2 text-sm font-semibold text-emerald-300 hover:border-emerald-300"
+          >
+            Ingresar
+          </button>
+          <button
+            id="logoutButton"
+            class="hidden rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-emerald-400"
+          >
+            Cerrar sesión
+          </button>
+        </div>
       </div>
     </header>
 
@@ -131,7 +140,7 @@
               </select>
             </label>
             <label class="flex flex-col text-sm">
-              Ciudad / Localidad
+              Ciudad
               <select name="ciudad" class="input-field" required>
                 <option value="">Selecciona</option>
                 <option>Ciudad de México</option>
@@ -140,6 +149,12 @@
                 <option>Mérida</option>
                 <option>Puebla</option>
                 <option>Querétaro</option>
+              </select>
+            </label>
+            <label class="flex flex-col text-sm">
+              Localidad
+              <select name="localidad" class="input-field" required>
+                <option value="">Selecciona</option>
               </select>
             </label>
             <label class="flex flex-col text-sm">
@@ -180,6 +195,7 @@
                 <option value="">Selecciona</option>
                 <option>1</option>
                 <option>2</option>
+                <option>3</option>
               </select>
             </label>
             <fieldset class="flex flex-col gap-3 text-sm md:col-span-3">
@@ -196,7 +212,9 @@
               <legend class="font-semibold">Preferencias</legend>
               <div class="flex flex-wrap gap-4">
                 <label class="chip"><input type="checkbox" name="preferencias" value="ventilación natural" />Ventilación natural</label>
-                <label class="chip"><input type="checkbox" name="preferencias" value="iluminación" />Iluminación</label>
+                <label class="chip"><input type="checkbox" name="preferencias" value="iluminación natural" />Iluminación natural</label>
+                <label class="chip"><input type="checkbox" name="preferencias" value="energía solar" />Energía solar</label>
+                <label class="chip"><input type="checkbox" name="preferencias" value="captación de agua" />Captación de agua</label>
                 <label class="chip"><input type="checkbox" name="preferencias" value="bajo mantenimiento" />Bajo mantenimiento</label>
               </div>
             </fieldset>
@@ -205,7 +223,9 @@
               <div class="grid gap-3 md:grid-cols-3">
                 <label class="chip"><input type="checkbox" name="espacios" value="cocina" />Cocina</label>
                 <label class="chip"><input type="checkbox" name="espacios" value="baño" />Baño</label>
+                <label class="chip"><input type="checkbox" name="espacios" value="baño completo" />Baño completo</label>
                 <label class="chip"><input type="checkbox" name="espacios" value="recámara" />Recámara</label>
+                <label class="chip"><input type="checkbox" name="espacios" value="recámara principal" />Recámara principal</label>
                 <label class="chip"><input type="checkbox" name="espacios" value="patio" />Patio</label>
                 <label class="chip"><input type="checkbox" name="espacios" value="sala" />Sala</label>
                 <label class="chip"><input type="checkbox" name="espacios" value="comedor" />Comedor</label>
@@ -231,24 +251,39 @@
             <div class="mt-6 grid gap-6 md:grid-cols-2">
               <div>
                 <h4 class="font-semibold uppercase tracking-wider text-xs text-emerald-400">Plano 2D</h4>
-                <div class="mt-3 rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
-                  <pre id="blueprint2D" class="overflow-x-auto text-xs text-emerald-300"></pre>
-                </div>
+                <div id="blueprint2D" class="mt-3 rounded-2xl border border-slate-800 bg-slate-950/60 p-4"></div>
+                <ul id="blueprintLegend" class="mt-4 flex flex-wrap gap-3 text-xs text-slate-300"></ul>
               </div>
               <div>
                 <h4 class="font-semibold uppercase tracking-wider text-xs text-emerald-400">Plano 3D</h4>
                 <div class="mt-3 space-y-3 rounded-2xl border border-slate-800 bg-slate-950/40 p-4 text-sm text-slate-300" id="blueprint3D"></div>
               </div>
             </div>
+            <div class="mt-6 grid gap-6 lg:grid-cols-[2fr,1fr]">
+              <div>
+                <h4 class="font-semibold uppercase tracking-wider text-xs text-emerald-400">Mapa del terreno</h4>
+                <div id="projectMap" class="mt-3 h-72 w-full overflow-hidden rounded-2xl border border-slate-800"></div>
+              </div>
+              <aside class="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-300">
+                <h5 class="text-emerald-300">Orientación solar</h5>
+                <p id="solarOrientation" class="mt-2 text-sm"></p>
+                <h6 class="mt-4 text-xs uppercase tracking-wider text-emerald-200">Recomendaciones</h6>
+                <ul id="siteRecommendations" class="mt-2 list-disc space-y-1 pl-5"></ul>
+              </aside>
+            </div>
             <div class="mt-8 grid gap-6 md:grid-cols-2">
               <div>
                 <h4 class="font-semibold uppercase tracking-wider text-xs text-emerald-400">Manual paso a paso</h4>
                 <ol id="manualSteps" class="mt-3 space-y-4 text-sm text-slate-300"></ol>
               </div>
-              <div>
+              <div class="space-y-4">
                 <h4 class="font-semibold uppercase tracking-wider text-xs text-emerald-400">Materiales y costos</h4>
                 <ul id="materialList" class="mt-3 space-y-3 text-sm text-slate-300"></ul>
                 <div id="estimatedCost" class="mt-4 text-lg font-semibold text-emerald-300"></div>
+                <div>
+                  <h5 class="font-semibold text-emerald-300">Guía vinculada</h5>
+                  <div id="roomGuide" class="mt-3 text-sm text-slate-300"></div>
+                </div>
               </div>
             </div>
             <div class="mt-8">
@@ -260,6 +295,20 @@
           <div class="rounded-3xl border border-slate-800 bg-slate-900 p-8">
             <h4 class="text-xl font-semibold">Opciones generadas por IA</h4>
             <div id="planOptions" class="mt-4 grid gap-4 md:grid-cols-3"></div>
+          </div>
+
+          <div class="rounded-3xl border border-slate-800 bg-slate-900 p-8">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <h4 class="text-xl font-semibold">Panel del usuario</h4>
+              <span class="text-sm text-slate-400">Seguimiento de tus proyectos</span>
+            </div>
+            <div class="mt-4">
+              <div class="h-2 w-full rounded-full bg-slate-800">
+                <div id="projectVideoProgress" class="h-2 rounded-full bg-emerald-500" style="width: 0%"></div>
+              </div>
+              <p id="projectProgressText" class="mt-2 text-xs uppercase tracking-wider text-emerald-200">0%</p>
+            </div>
+            <div id="projectList" class="mt-6 grid gap-4 md:grid-cols-2"></div>
           </div>
         </div>
       </section>
@@ -276,21 +325,24 @@
         <div class="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h2 class="text-3xl font-bold">Videos educativos</h2>
-            <p class="text-slate-300">Filtra por categoría o busca por tema.</p>
+            <p class="text-slate-300">Domina cada nivel de autoconstrucción con guías en video vinculadas al manual.</p>
           </div>
           <div class="flex flex-wrap gap-2">
-            <select id="videoCategory" class="input-field">
-              <option value="">Todas las categorías</option>
-              <option value="estructura">Estructura</option>
-              <option value="electricidad">Electricidad</option>
-              <option value="drenaje">Drenaje</option>
-              <option value="ventilacion">Ventilación</option>
-              <option value="acabados">Acabados</option>
+            <select id="videoLevel" class="input-field">
+              <option value="">Todos los niveles</option>
+              <option value="principiante">Principiante</option>
+              <option value="intermedio">Intermedio</option>
+              <option value="avanzado">Avanzado</option>
             </select>
-            <input id="videoSearch" type="search" placeholder="Buscar video" class="input-field" />
+            <input id="videoSearch" type="search" placeholder="Buscar por tema" class="input-field" />
           </div>
         </div>
-        <div id="videoList" class="grid gap-6 md:grid-cols-2"></div>
+        <div class="rounded-3xl border border-slate-800 bg-slate-900/80 p-6">
+          <p class="text-sm text-slate-300">
+            Marca los videos como vistos para avanzar en tu manual y desbloquear el botón de "Generar manual" con recomendaciones personalizadas.
+          </p>
+          <div id="videoList" class="mt-6 grid gap-6 md:grid-cols-2 xl:grid-cols-3"></div>
+        </div>
       </section>
 
       <section id="marketplace" class="space-y-10">
@@ -347,6 +399,56 @@
         <div id="testimonialList" class="grid gap-4 md:grid-cols-3"></div>
       </section>
     </main>
+
+    <div
+      id="authModal"
+      class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/80 backdrop-blur"
+    >
+      <div class="relative w-full max-w-3xl rounded-3xl border border-slate-800 bg-slate-900 p-8 shadow-2xl">
+        <button
+          id="closeAuthModal"
+          class="absolute right-4 top-4 rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-400 hover:text-emerald-300"
+        >
+          Cerrar
+        </button>
+        <div class="grid gap-6 md:grid-cols-2">
+          <div>
+            <h3 class="text-xl font-semibold text-emerald-300">Iniciar sesión</h3>
+            <p class="mt-1 text-sm text-slate-400">Accede a tus proyectos guardados y continúa tu manual constructivo.</p>
+            <form id="loginForm" class="mt-4 space-y-3">
+              <label class="block text-sm">
+                Correo electrónico
+                <input type="email" name="email" class="input-field mt-1" required />
+              </label>
+              <label class="block text-sm">
+                Contraseña
+                <input type="password" name="password" class="input-field mt-1" required />
+              </label>
+              <button type="submit" class="action-button w-full">Entrar</button>
+            </form>
+          </div>
+          <div>
+            <h3 class="text-xl font-semibold text-emerald-300">Crear cuenta</h3>
+            <p class="mt-1 text-sm text-slate-400">Guarda múltiples proyectos y registra tu avance en videos y manuales.</p>
+            <form id="registerForm" class="mt-4 space-y-3">
+              <label class="block text-sm">
+                Nombre completo (opcional)
+                <input type="text" name="full_name" class="input-field mt-1" />
+              </label>
+              <label class="block text-sm">
+                Correo electrónico
+                <input type="email" name="email" class="input-field mt-1" required />
+              </label>
+              <label class="block text-sm">
+                Contraseña
+                <input type="password" name="password" class="input-field mt-1" required minlength="8" />
+              </label>
+              <button type="submit" class="action-secondary w-full">Registrarme</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <footer class="border-t border-slate-800 bg-slate-900/70 py-6">
       <div class="mx-auto flex max-w-6xl flex-col gap-3 px-6 text-sm text-slate-400 md:flex-row md:items-center md:justify-between">
