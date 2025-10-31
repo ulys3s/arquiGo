@@ -5,7 +5,11 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from .youtube_service import get_step_video, get_video_by_manual_step
+from .youtube_service import (
+    get_step_video,
+    get_video_by_manual_step,
+    recommended_videos_for_project,
+)
 
 ROOM_PRESETS = {
     "cocina": {"area": 12, "type": "wet"},
@@ -119,6 +123,7 @@ def generate_project_package(form_data: dict[str, Any]) -> dict[str, Any]:
     materials = _estimate_materials(form_data, total_area)
     viability = _calculate_viability(form_data, rooms, materials)
     manual = _build_manual(form_data, materials)
+    manual["recommended_videos"] = recommended_videos_for_project(form_data)
 
     return {
         "overview": {

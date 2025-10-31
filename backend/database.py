@@ -16,6 +16,13 @@ def get_connection() -> sqlite3.Connection:
     return connection
 
 
+def _ensure_column(connection: sqlite3.Connection, table: str, column: str, alter_sql: str) -> None:
+    """Add a column to an existing table when seeding legacy databases."""
+    columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+    if column not in columns:
+        connection.execute(alter_sql)
+
+
 def init_db() -> None:
     """Create all required tables if they do not exist."""
     with get_connection() as connection:
@@ -26,6 +33,8 @@ def init_db() -> None:
                 email TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
                 full_name TEXT,
+                city TEXT,
+                project_type TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -127,6 +136,14 @@ def init_db() -> None:
                 quote TEXT NOT NULL
             );
             """
+        )
+
+        _ensure_column(connection, "users", "city", "ALTER TABLE users ADD COLUMN city TEXT")
+        _ensure_column(
+            connection,
+            "users",
+            "project_type",
+            "ALTER TABLE users ADD COLUMN project_type TEXT",
         )
 
 
@@ -317,14 +334,21 @@ def seed_data() -> None:
             )
 
 
-def create_user(email: str, password_hash: str, full_name: str | None = None) -> int:
+def create_user(
+    email: str,
+    password_hash: str,
+    full_name: str | None = None,
+    *,
+    city: str | None = None,
+    project_type: str | None = None,
+) -> int:
     with get_connection() as connection:
         cursor = connection.execute(
             """
-            INSERT INTO users (email, password_hash, full_name)
-            VALUES (?, ?, ?)
+            INSERT INTO users (email, password_hash, full_name, city, project_type)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (email.lower(), password_hash, full_name),
+            (email.lower(), password_hash, full_name, city, project_type),
         )
         return int(cursor.lastrowid)
 
@@ -332,7 +356,11 @@ def create_user(email: str, password_hash: str, full_name: str | None = None) ->
 def get_user_by_email(email: str) -> dict[str, Any] | None:
     with get_connection() as connection:
         row = connection.execute(
-            "SELECT id, email, password_hash, full_name, created_at FROM users WHERE email = ?",
+            """
+            SELECT id, email, password_hash, full_name, city, project_type, created_at
+            FROM users
+            WHERE email = ?
+            """,
             (email.lower(),),
         ).fetchone()
     return dict(row) if row else None
@@ -341,7 +369,7 @@ def get_user_by_email(email: str) -> dict[str, Any] | None:
 def get_user_by_id(user_id: int) -> dict[str, Any] | None:
     with get_connection() as connection:
         row = connection.execute(
-            "SELECT id, email, full_name, created_at FROM users WHERE id = ?",
+            "SELECT id, email, full_name, city, project_type, created_at FROM users WHERE id = ?",
             (user_id,),
         ).fetchone()
     return dict(row) if row else None
@@ -364,7 +392,7 @@ def get_user_by_token(token: str) -> dict[str, Any] | None:
     with get_connection() as connection:
         row = connection.execute(
             """
-            SELECT users.id, users.email, users.full_name
+            SELECT users.id, users.email, users.full_name, users.city, users.project_type
             FROM sessions
             JOIN users ON users.id = sessions.user_id
             WHERE sessions.token = ?

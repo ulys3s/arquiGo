@@ -31,6 +31,7 @@ const elements = {
   openLogin: document.querySelectorAll("[data-open-login]") || [],
   userName: document.querySelector("#userName"),
   projectForm: document.querySelector("#projectForm"),
+  authWarning: document.querySelector("#authWarning"),
   projectResults: document.querySelector("#projectResults"),
   viabilityScore: document.querySelector("#viabilityScore"),
   blueprint2D: document.querySelector("#blueprint2D"),
@@ -45,9 +46,11 @@ const elements = {
   manualLevels: document.querySelector("#manualLevels"),
   refreshManual: document.querySelector("#refreshManual"),
   downloadManual: document.querySelector("#downloadManual"),
+  manualRecommended: document.querySelector("#manualRecommended"),
   projectList: document.querySelector("#projectList"),
   projectProgressBar: document.querySelector("#projectVideoProgress"),
   projectProgressText: document.querySelector("#projectProgressText"),
+  dashboardRecommendations: document.querySelector("#dashboardRecommendations"),
   videoContainer: document.querySelector("#videoList"),
   videoFilterLevel: document.querySelector("#videoLevel"),
   videoFilterSearch: document.querySelector("#videoSearch"),
@@ -117,7 +120,7 @@ function attachProjectHandlers() {
       if (!response.ok) throw new Error(data.error || "No se pudo generar el proyecto");
       state.currentProjectId = data.project_id;
       renderProject(data);
-      await loadProjects();
+      await Promise.all([loadProjects(), loadDashboard()]);
     } catch (error) {
       console.error(error);
       alert(error.message);
@@ -146,12 +149,13 @@ async function authenticateUser(endpoint, formData) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(Object.fromEntries(formData)),
+      credentials: "include",
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "No se pudo iniciar sesión");
     setAuthState(data.token, data.user);
     toggleAuthModal(false);
-    await Promise.all([loadProjects(), loadManualLevels(), loadVideos()]);
+    await Promise.all([loadProjects(), loadManualLevels(), loadVideos(), loadDashboard()]);
   } catch (error) {
     console.error(error);
     alert(error.message);
@@ -164,7 +168,7 @@ function hydrateAuthState() {
     return;
   }
   updateUserBadge();
-  Promise.all([loadProjects(), loadManualLevels(), loadVideos()]).catch((error) => {
+  Promise.all([loadProjects(), loadManualLevels(), loadVideos(), loadDashboard()]).catch((error) => {
     console.error(error);
     if (error.status === 401) clearAuthState();
   });
@@ -176,6 +180,7 @@ function setAuthState(token, user) {
   localStorage.setItem("cs_token", token);
   localStorage.setItem("cs_user", JSON.stringify(user));
   updateUserBadge();
+  displayAuthWarning(false);
 }
 
 function clearAuthState() {
@@ -185,10 +190,17 @@ function clearAuthState() {
   localStorage.removeItem("cs_token");
   localStorage.removeItem("cs_user");
   updateUserBadge();
+  displayAuthWarning(false);
   elements.projectResults?.classList.add("hidden");
   elements.projectList && (elements.projectList.innerHTML = "");
   if (elements.projectProgressBar) elements.projectProgressBar.style.width = "0%";
   if (elements.projectProgressText) elements.projectProgressText.textContent = "0%";
+  if (elements.manualRecommended)
+    elements.manualRecommended.innerHTML =
+      '<p class="text-sm text-slate-400">Inicia sesión para ver videos personalizados.</p>';
+  if (elements.dashboardRecommendations)
+    elements.dashboardRecommendations.innerHTML =
+      '<p class="text-sm text-slate-400">Genera tu primer proyecto para recibir recomendaciones.</p>';
 }
 
 function updateUserBadge() {
@@ -204,6 +216,12 @@ function updateUserBadge() {
   }
 }
 
+function displayAuthWarning(visible, message = "Autenticación requerida. Inicia sesión para continuar.") {
+  if (!elements.authWarning) return;
+  elements.authWarning.textContent = message;
+  elements.authWarning.classList.toggle("hidden", !visible);
+}
+
 function toggleAuthModal(show) {
   if (!elements.authModal) return alert("Inicia sesión para continuar");
   elements.authModal.classList.toggle("hidden", !show);
@@ -211,7 +229,10 @@ function toggleAuthModal(show) {
 
 function ensureAuth(showDialog = true) {
   if (state.token) return true;
-  if (showDialog) toggleAuthModal(true);
+  if (showDialog) {
+    displayAuthWarning(true);
+    toggleAuthModal(true);
+  }
   return false;
 }
 
@@ -237,10 +258,13 @@ function formDataToJSON(formData) {
 
 async function fetchWithAuth(url, options = {}) {
   const config = { ...options };
+  config.credentials = "include";
   config.headers = {
     ...(options.headers || {}),
-    Authorization: state.token ? `Bearer ${state.token}` : undefined,
   };
+  if (state.token) {
+    config.headers.Authorization = `Bearer ${state.token}`;
+  }
   const response = await fetch(url, config);
   if (response.status === 401) {
     clearAuthState();
@@ -252,16 +276,38 @@ async function fetchWithAuth(url, options = {}) {
 async function loadProjects() {
   if (!ensureAuth(false)) return;
   const response = await fetchWithAuth(`${API_BASE}/projects`);
-  const { projects } = await response.json();
+  const data = await response.json();
+  if (!response.ok || !data.success) throw new Error(data.error || "No se pudieron cargar los proyectos");
+  const { projects } = data;
   renderProjectList(projects);
   if (projects.length && !state.currentProjectId) {
     state.currentProjectId = projects[0].id;
     renderProject(projects[0].plan_data);
   }
-  if (elements.projectProgressBar && projects.length) {
-    const progress = Math.round(projects[0].video_progress * 100);
+}
+
+async function loadDashboard() {
+  if (!ensureAuth(false)) return;
+  const response = await fetchWithAuth(`${API_BASE}/dashboard`);
+  const data = await response.json();
+  if (!data.success) return;
+  renderDashboard(data);
+}
+
+function renderDashboard(data) {
+  if (elements.projectProgressBar) {
+    const progress = Math.round((data.progress?.percentage || 0) * 100);
     elements.projectProgressBar.style.width = `${progress}%`;
-    if (elements.projectProgressText) elements.projectProgressText.textContent = `${progress}%`;
+  }
+  if (elements.projectProgressText) {
+    const progress = Math.round((data.progress?.percentage || 0) * 100);
+    elements.projectProgressText.textContent = `${progress}%`;
+  }
+  if (elements.dashboardRecommendations) {
+    renderPlaylist(elements.dashboardRecommendations, data.recommended_videos, {
+      compact: true,
+      emptyMessage: "Genera tu primer proyecto para recibir recomendaciones.",
+    });
   }
 }
 
@@ -335,6 +381,19 @@ function renderProject(data) {
         `
       )
       .join("");
+  }
+
+  if (elements.manualRecommended) {
+    renderPlaylist(elements.manualRecommended, data.manual?.recommended_videos, {
+      emptyMessage: "Genera tu proyecto para recibir videos por etapa.",
+    });
+  }
+
+  if (elements.dashboardRecommendations) {
+    renderPlaylist(elements.dashboardRecommendations, data.manual?.recommended_videos, {
+      compact: true,
+      emptyMessage: "Genera tu primer proyecto para recibir recomendaciones.",
+    });
   }
 
   if (elements.materialList) {
@@ -415,15 +474,7 @@ function renderRoomGuide(room) {
       ` : ""}
     </div>
   `;
-
-  elements.roomGuide
-    .querySelectorAll("[data-watch-video]")
-    .forEach((button) =>
-      button.addEventListener("click", () => {
-        const videoId = Number(button.dataset.watchVideo);
-        markVideoAsWatched(videoId);
-      })
-    );
+  attachWatchButtons(elements.roomGuide);
 }
 
 function renderBlueprintLegend() {
@@ -443,7 +494,9 @@ function renderBlueprintLegend() {
 async function loadManualLevels() {
   if (!ensureAuth(false)) return;
   const response = await fetchWithAuth(`${API_BASE}/manual/steps`);
-  const { steps } = await response.json();
+  const data = await response.json();
+  if (!response.ok || !data.success) return;
+  const { steps } = data;
   if (!elements.manualLevels) return;
   elements.manualLevels.innerHTML = steps
     .map(
@@ -478,7 +531,9 @@ async function loadVideos() {
   if (elements.videoFilterLevel?.value) params.set("level", elements.videoFilterLevel.value);
   if (elements.videoFilterSearch?.value) params.set("search", elements.videoFilterSearch.value);
   const response = await fetchWithAuth(`${API_BASE}/videos?${params.toString()}`);
-  const { videos } = await response.json();
+  const data = await response.json();
+  if (!response.ok || !data.success) return;
+  const { videos } = data;
   renderVideoLibrary(videos);
 }
 
@@ -500,7 +555,8 @@ function renderVideoLibrary(videos) {
             <iframe class="aspect-video w-full" src="https://www.youtube.com/embed/${video.youtube_id}" allowfullscreen loading="lazy" title="${video.title}"></iframe>
           </div>
           <p class="mt-3 text-sm text-slate-300">${video.description}</p>
-          <p class="mt-2 text-xs text-slate-400">Paso del manual: ${video.manual_step.replace(/_/g, " ")}</p>
+          <p class="mt-2 text-xs text-slate-400">Etapa: ${video.stage || "General"}</p>
+          <p class="text-xs text-slate-500">Paso del manual: ${(video.manual_step || "general").replace(/_/g, " ")}</p>
           <button class="mt-3 w-full rounded-full ${video.watched ? "bg-slate-800 text-emerald-200" : "bg-emerald-500 text-slate-950"} px-4 py-2 text-sm font-semibold" data-watch-video="${video.id}">
             ${video.watched ? "Marcado como visto" : "Marcar como visto"}
           </button>
@@ -508,8 +564,59 @@ function renderVideoLibrary(videos) {
       `
     )
     .join("");
+  attachWatchButtons(elements.videoContainer);
+}
 
-  elements.videoContainer.querySelectorAll("[data-watch-video]").forEach((button) => {
+function renderPlaylist(container, playlist, { compact = false, emptyMessage = "" } = {}) {
+  if (!container) return;
+  if (!playlist || !playlist.length) {
+    container.innerHTML = emptyMessage
+      ? `<p class="text-sm text-slate-400">${emptyMessage}</p>`
+      : "";
+    return;
+  }
+  container.innerHTML = playlist
+    .map(
+      (group) => `
+        <article class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+          <h5 class="text-sm font-semibold uppercase tracking-wide text-emerald-200">${group.stage}</h5>
+          <div class="mt-3 space-y-3">
+            ${group.videos
+              .map((video) =>
+                compact
+                  ? `
+                      <div class="rounded-xl border border-slate-800 bg-slate-900/50 p-3">
+                        <p class="text-sm font-semibold text-slate-100">${video.title}</p>
+                        <p class="text-xs text-slate-400">${video.description}</p>
+                        <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                          <a class="text-emerald-300" href="https://www.youtube.com/watch?v=${video.youtube_id}" target="_blank" rel="noopener">Ver en YouTube</a>
+                          <button class="rounded-full border border-emerald-400/40 px-3 py-1 text-emerald-200" data-watch-video="${video.id}">Marcar como visto</button>
+                        </div>
+                      </div>
+                    `
+                  : `
+                      <div class="rounded-2xl border border-slate-800 bg-slate-900/40 p-3">
+                        <p class="text-sm font-semibold text-slate-100">${video.title}</p>
+                        <p class="text-xs text-slate-400">${video.description}</p>
+                        <div class="mt-3 overflow-hidden rounded-xl">
+                          <iframe class="aspect-video w-full" src="https://www.youtube.com/embed/${video.youtube_id}" title="${video.title}" allowfullscreen loading="lazy"></iframe>
+                        </div>
+                        <button class="mt-3 rounded-full bg-emerald-500 px-4 py-2 text-xs font-semibold text-slate-950" data-watch-video="${video.id}">Marcar como visto</button>
+                      </div>
+                    `
+              )
+              .join("")}
+          </div>
+        </article>
+      `
+    )
+    .join("");
+  attachWatchButtons(container);
+}
+
+function attachWatchButtons(root) {
+  if (!root) return;
+  root.querySelectorAll("[data-watch-video]").forEach((button) => {
     button.addEventListener("click", () => {
       const videoId = Number(button.dataset.watchVideo);
       markVideoAsWatched(videoId, button);
@@ -529,6 +636,7 @@ async function markVideoAsWatched(videoId, button) {
   const { progress } = await response.json();
   if (elements.projectProgressBar) elements.projectProgressBar.style.width = `${Math.round(progress * 100)}%`;
   if (elements.projectProgressText) elements.projectProgressText.textContent = `${Math.round(progress * 100)}%`;
+  loadDashboard().catch(console.error);
 }
 
 function initLocationControls() {
