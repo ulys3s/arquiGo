@@ -14,24 +14,19 @@ def build_manual_steps(level_filter: str | None = None) -> list[dict[str, Any]]:
     """Return the canonical manual steps, optionally filtered by level."""
     levels = [
         {
-            "level": "nivel_1",
-            "title": "Nivel 1: Cimientos y drenaje",
-            "summary": "Preparación del terreno, trazos y armado de zapatas.",
+            "level": "principiante",
+            "title": "Principiante: Preparación y cimientos",
+            "summary": "Preparación del terreno, trazos, compactación y cimentación segura.",
         },
         {
-            "level": "nivel_2",
-            "title": "Nivel 2: Muros y estructura",
-            "summary": "Levantamiento de muros y colocación de refuerzos estructurales.",
+            "level": "intermedio",
+            "title": "Intermedio: Muros e instalaciones",
+            "summary": "Levantamiento de muros, instalaciones hidráulicas y eléctricas básicas.",
         },
         {
-            "level": "nivel_3",
-            "title": "Nivel 3: Techos e instalaciones",
-            "summary": "Cubiertas, instalaciones eléctricas e hidráulicas.",
-        },
-        {
-            "level": "nivel_4",
-            "title": "Nivel 4: Acabados y pintura",
-            "summary": "Sellos, recubrimientos y pintura final.",
+            "level": "avanzado",
+            "title": "Avanzado: Acabados y supervisión",
+            "summary": "Acabados, impermeabilización, revisión de seguridad y entrega.",
         },
     ]
     if level_filter:

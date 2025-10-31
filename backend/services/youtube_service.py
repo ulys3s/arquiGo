@@ -7,16 +7,15 @@ from .. import database
 
 
 LEVEL_ALIASES = {
-    "nivel_1": "cimientos",
-    "nivel_2": "estructura",
-    "nivel_3": "instalaciones",
-    "nivel_4": "acabados",
+    "principiante": "cimientos",
+    "intermedio": "estructura",
+    "avanzado": "acabados",
 }
 
 
 def list_videos(category: str | None = None, search: str | None = None) -> list[dict[str, Any]]:
     """Return videos from the catalog filtered by category or keyword."""
-    query = "SELECT title, category, youtube_id, level, description FROM videos"
+    query = "SELECT id, title, category, youtube_id, level, description, manual_step FROM videos"
     params: list[str] = []
     filters: list[str] = []
 
@@ -45,3 +44,13 @@ def get_manual_videos(level: str) -> list[dict[str, Any]]:
 def get_step_video(level: str) -> dict[str, Any] | None:
     videos = get_manual_videos(level)
     return videos[0] if videos else None
+
+
+def get_video_by_manual_step(manual_step: str | None) -> dict[str, Any] | None:
+    if not manual_step:
+        return None
+    rows = database.fetch_rows(
+        "SELECT id, title, youtube_id, level, category, description, manual_step FROM videos WHERE manual_step = ?",
+        (manual_step,),
+    )
+    return rows[0] if rows else None
