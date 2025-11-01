@@ -344,7 +344,7 @@ def preview_plan() -> Response:
 # ---------------------------------------------------------------------------
 VIDEO_LEVEL_ORDER = {"principiante": 0, "intermedio": 1, "avanzado": 2}
 VIDEO_LEVEL_LABELS = {
-    "principiante": "Fácil / Principiante",
+    "principiante": "Nivel Fácil (Principiante)",
     "intermedio": "Nivel Intermedio",
     "avanzado": "Nivel Avanzado",
 }
@@ -384,6 +384,7 @@ def list_videos() -> Response:
                         "stage": video.stage,
                         "manual_step": video.manual_step,
                         "description": video.description,
+                        "thumbnail": video.thumbnail_url,
                         "watched": video.id in watched_ids,
                     }
                     for video in level_videos

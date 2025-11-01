@@ -95,3 +95,107 @@ body {
   padding: 1rem 1.25rem;
   color: rgb(252, 211, 77);
 }
+
+.video-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  height: 100%;
+}
+
+.video-level {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 100%;
+}
+
+.video-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.video-grid .video-card {
+  background: rgba(15, 23, 42, 0.78);
+}
+
+@media (min-width: 1024px) {
+  .video-level {
+    align-self: stretch;
+  }
+}
+
+.video-frame {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1.25rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: radial-gradient(circle at 20% 20%, rgba(16, 185, 129, 0.1), rgba(15, 23, 42, 0.85));
+}
+
+.video-frame iframe {
+  width: 100%;
+  min-height: 200px;
+  aspect-ratio: 16 / 9;
+  border: 0;
+  border-radius: 1.25rem;
+}
+
+.video-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1.5rem;
+  background: rgba(15, 23, 42, 0.88);
+  text-align: center;
+}
+
+.video-fallback img {
+  max-width: 260px;
+  border-radius: 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+}
+
+.testimonial-card {
+  min-width: 260px;
+  max-width: 320px;
+  scroll-snap-align: center;
+  border-radius: 1.5rem;
+  border: 1px solid rgba(15, 118, 110, 0.35);
+  background: rgba(15, 23, 42, 0.78);
+  padding: 1.5rem;
+  box-shadow: 0 25px 45px -25px rgba(16, 185, 129, 0.35);
+}
+
+.testimonial-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(56, 189, 248, 0.25));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  color: rgb(226, 232, 240);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.map-shell {
+  height: var(--map-shell-height, clamp(320px, 45vh, 520px));
+  background: linear-gradient(160deg, rgba(15, 118, 110, 0.25), rgba(15, 23, 42, 0.85));
+}
+
+.map-shell.leaflet-container {
+  height: var(--map-shell-height, clamp(320px, 45vh, 520px));
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.map-shell .leaflet-control-container .leaflet-top.leaflet-left {
+  margin-top: 1.25rem;
+  margin-left: 1.25rem;
+}

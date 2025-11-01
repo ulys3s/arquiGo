@@ -97,4 +97,26 @@ def validate_project_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError(f"Valor inválido para {field}: {value}")
             validated[field] = value
 
+    if payload.get("boundary") is not None:
+        validated["boundary"] = _validate_boundary(payload["boundary"])
+
     return validated
+
+
+def _validate_boundary(boundary: Any) -> dict[str, Any]:
+    if not isinstance(boundary, dict):
+        raise ValueError("El contorno del terreno debe ser un objeto GeoJSON")
+    if boundary.get("type") == "Feature":
+        geometry = boundary.get("geometry")
+        properties = boundary.get("properties", {})
+    else:
+        geometry = boundary
+        properties = {}
+    if not isinstance(geometry, dict) or geometry.get("type") != "Polygon":
+        raise ValueError("El contorno del terreno debe ser un polígono válido")
+    coordinates = geometry.get("coordinates")
+    if not isinstance(coordinates, list) or not coordinates:
+        raise ValueError("El polígono del terreno debe incluir coordenadas")
+    if any(not isinstance(ring, list) or not ring for ring in coordinates):
+        raise ValueError("Coordenadas del terreno incompletas")
+    return {"type": "Feature", "geometry": geometry, "properties": properties}
