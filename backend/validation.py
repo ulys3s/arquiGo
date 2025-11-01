@@ -54,6 +54,9 @@ ALLOWED_VALUES = {
         "baño completo",
         "recámara principal",
     ],
+    "orientacion": ["norte", "sur", "este", "oeste"],
+    "ventilacion": ["natural", "cruzada", "forzada"],
+    "iluminacion": ["natural", "mixta", "artificial"],
 }
 
 REQUIRED_FIELDS = [
@@ -88,6 +91,8 @@ def validate_project_payload(payload: dict[str, Any]) -> dict[str, Any]:
             validated[field] = values
         else:
             value = payload.get(field)
+            if value is None:
+                continue
             if value not in allowed:
                 raise ValueError(f"Valor inválido para {field}: {value}")
             validated[field] = value

@@ -69,8 +69,10 @@ def _compose_pdf_content(project_id: int, project_summary: dict[str, Any]) -> by
     lines.append("Pasos principales:")
     for step in project_summary.get("manual", {}).get("steps", []):
         lines.append(f"  Paso {step['step']}: {step['description']}")
-        if step.get("video"):
-            lines.append(f"    Video: https://www.youtube.com/watch?v={step['video']['youtube_id']}")
+        video = step.get("video") or {}
+        if video:
+            video_url = video.get("url") or f"https://www.youtube.com/watch?v={video.get('youtube_id')}"
+            lines.append(f"    Video: {video_url}")
     lines.append("")
 
     lines.append("Materiales principales:")

@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any, Iterable, Sequence
 
 from .. import database
+from ..models import build_youtube_embed_url, build_youtube_watch_url
 
 
 LEVEL_ALIASES = {
@@ -24,26 +25,20 @@ STAGE_ORDER: Sequence[str] = tuple(STAGE_KEYWORDS.keys())
 DEFAULT_STAGE = "Aprendizaje complementario"
 
 
-def list_videos(category: str | None = None, search: str | None = None) -> list[dict[str, Any]]:
-    """Return videos from the catalog filtered by category or keyword."""
-    query = "SELECT id, title, category, youtube_id, level, description, manual_step FROM videos"
-    params: list[str] = []
-    filters: list[str] = []
+def list_videos(
+    *,
+    category: str | None = None,
+    search: str | None = None,
+    level: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return videos from the catalog filtered by category, level or keyword."""
 
-    if category:
-        filters.append("category = ?")
-        params.append(category)
-    if search:
-        filters.append("title LIKE ?")
-        params.append(f"%{search}%")
-
-    if filters:
-        query += " WHERE " + " AND ".join(filters)
-
-    query += " ORDER BY title"
-    videos = database.fetch_rows(query, params)
+    videos = database.list_videos(category=category, level=level, search=search)
     for video in videos:
-        video["stage"] = _stage_for_video(video)
+        if not video.get("stage"):
+            video["stage"] = _stage_for_video(video)
+        video.setdefault("tags", "")
+        _enrich_video(video)
     videos.sort(key=_video_sort_key)
     return videos
 
@@ -64,11 +59,10 @@ def get_step_video(level: str) -> dict[str, Any] | None:
 def get_video_by_manual_step(manual_step: str | None) -> dict[str, Any] | None:
     if not manual_step:
         return None
-    rows = database.fetch_rows(
-        "SELECT id, title, youtube_id, level, category, description, manual_step FROM videos WHERE manual_step = ?",
-        (manual_step,),
-    )
-    return rows[0] if rows else None
+    for video in list_videos():
+        if (video.get("manual_step") or "").lower() == manual_step.lower():
+            return video
+    return None
 
 
 def group_videos_by_stage() -> dict[str, list[dict[str, Any]]]:
@@ -87,19 +81,35 @@ def recommended_videos_for_project(
     """Build a playlist tailored to the project configuration."""
 
     watched = set(watched_ids or [])
-    priority_steps: set[str] = set()
+    priority_targets: set[str] = set()
     levels = int(form_data.get("plantas") or 1)
     spaces = {space.lower() for space in form_data.get("espacios", [])}
     preferences = {pref.lower() for pref in form_data.get("preferencias", [])}
+    climate = (form_data.get("clima") or "").lower()
+    orientation = (form_data.get("orientacion") or "").lower()
+    ventilation = (form_data.get("ventilacion") or "").lower()
+    lighting = (form_data.get("iluminacion") or "").lower()
 
     if levels > 1:
-        priority_steps.add("levantamiento_muros")
+        priority_targets.add("levantamiento_muros")
     if any("baño" in space for space in spaces) or "baño exterior" in preferences:
-        priority_steps.add("instalaciones_seguras")
+        priority_targets.add("instalaciones_seguras")
     if "terraza" in spaces or "ventilación natural" in preferences or "iluminación natural" in preferences:
-        priority_steps.add("ventilacion_iluminacion")
+        priority_targets.add("ventilacion_iluminacion")
     if "energía solar" in preferences or "captación de agua" in preferences:
-        priority_steps.add("preparacion_terreno")
+        priority_targets.add("preparacion_terreno")
+    if climate in {"húmedo", "humedo"}:
+        priority_targets.update({"drenaje", "impermeabilizacion", "preparacion_terreno"})
+    if orientation:
+        priority_targets.add("orientacion")
+    if ventilation:
+        priority_targets.add("ventilacion")
+    if lighting:
+        priority_targets.add("iluminacion")
+    if "cochera" in spaces:
+        priority_targets.add("cochera")
+    if "patio" in spaces:
+        priority_targets.add("drenaje")
 
     grouped = group_videos_by_stage()
     playlist: list[dict[str, Any]] = []
@@ -107,12 +117,12 @@ def recommended_videos_for_project(
         videos = grouped.get(stage, [])
         if not videos:
             continue
-        curated = _prioritize_videos(videos, priority_steps, watched)
+        curated = _prioritize_videos(videos, priority_targets, watched)
         playlist.append({"stage": stage, "videos": curated})
 
     extras = grouped.get(DEFAULT_STAGE, [])
     if extras:
-        curated = _prioritize_videos(extras, priority_steps, watched, limit=2)
+        curated = _prioritize_videos(extras, priority_targets, watched, limit=2)
         if curated:
             playlist.append({"stage": DEFAULT_STAGE, "videos": curated})
     return playlist
@@ -137,6 +147,14 @@ def recommended_videos_for_user(
     return recommended_videos_for_project(reference, watched_ids=watched_ids)
 
 
+def _enrich_video(video: dict[str, Any]) -> dict[str, Any]:
+    youtube_id = str(video.get("youtube_id", ""))
+    video["url"] = build_youtube_watch_url(youtube_id)
+    video["watch_url"] = video["url"]
+    video["embed_url"] = build_youtube_embed_url(youtube_id)
+    return video
+
+
 def _stage_for_video(video: dict[str, Any]) -> str:
     manual_step = (video.get("manual_step") or "").lower()
     category = (video.get("category") or "").lower()
@@ -151,16 +169,27 @@ def _video_sort_key(video: dict[str, Any]) -> tuple[int, str]:
     return (stage_index, video.get("title", ""))
 
 
+def _video_targets(video: dict[str, Any]) -> set[str]:
+    manual_step = (video.get("manual_step") or "").lower()
+    tags = {manual_step} if manual_step else set()
+    raw_tags = video.get("tags") or ""
+    for tag in raw_tags.split(","):
+        tag = tag.strip().lower()
+        if tag:
+            tags.add(tag)
+    return {tag for tag in tags if tag}
+
+
 def _prioritize_videos(
     videos: list[dict[str, Any]],
-    priority_steps: set[str],
+    priority_targets: set[str],
     watched_ids: set[int],
     *,
     limit: int = 3,
 ) -> list[dict[str, Any]]:
     def sort_key(video: dict[str, Any]) -> tuple[int, int, str]:
-        manual_step = (video.get("manual_step") or "").lower()
-        priority_score = 0 if manual_step in priority_steps else 1
+        targets = _video_targets(video)
+        priority_score = 0 if targets & priority_targets else 1
         watched_score = 0 if video.get("id") not in watched_ids else 1
         return (priority_score, watched_score, video.get("title", ""))
 

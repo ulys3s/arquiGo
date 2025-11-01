@@ -125,8 +125,39 @@ def init_db() -> None:
                 category TEXT NOT NULL,
                 youtube_id TEXT NOT NULL,
                 level TEXT NOT NULL,
+                stage TEXT,
                 description TEXT NOT NULL,
-                manual_step TEXT
+                manual_step TEXT,
+                tags TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS providers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                provider_type TEXT NOT NULL,
+                specialty TEXT,
+                city TEXT NOT NULL,
+                locality TEXT,
+                price_min REAL,
+                price_max REAL,
+                rating REAL DEFAULT 4.6,
+                description TEXT,
+                contact TEXT,
+                portfolio_url TEXT,
+                experience_years INTEGER DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS project_hires (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                project_id INTEGER NOT NULL,
+                provider_id INTEGER NOT NULL,
+                message TEXT,
+                status TEXT NOT NULL DEFAULT 'pendiente',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (project_id) REFERENCES user_projects(id) ON DELETE CASCADE,
+                FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS testimonials (
@@ -145,6 +176,8 @@ def init_db() -> None:
             "project_type",
             "ALTER TABLE users ADD COLUMN project_type TEXT",
         )
+        _ensure_column(connection, "videos", "stage", "ALTER TABLE videos ADD COLUMN stage TEXT")
+        _ensure_column(connection, "videos", "tags", "ALTER TABLE videos ADD COLUMN tags TEXT")
 
 
 def seed_data() -> None:
@@ -254,6 +287,88 @@ def seed_data() -> None:
                         180,
                         "Hipotecario verde",
                         "Uso de materiales certificados y diseño bioclimático",
+                    ),
+                ],
+            )
+
+        if not _has_rows(connection, "providers"):
+            connection.executemany(
+                """
+                INSERT INTO providers (
+                    name, provider_type, specialty, city, locality, price_min, price_max, rating, description, contact, portfolio_url, experience_years
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        "Arq. Sofía Méndez",
+                        "arquitectura",
+                        "Vivienda sostenible",
+                        "Ciudad de México",
+                        "Iztapalapa",
+                        15000,
+                        25000,
+                        4.9,
+                        "Diseños bioclimáticos con enfoque en autoconstrucción asistida.",
+                        "contacto@arqsofia.mx",
+                        "https://portfolio.arqsofia.mx",
+                        12,
+                    ),
+                    (
+                        "Ing. Luis Herrera",
+                        "asesoría",
+                        "Supervisión estructural",
+                        "Guadalajara",
+                        "Tonalá",
+                        8000,
+                        15000,
+                        4.7,
+                        "Acompañamiento técnico para cimentación y estructura ligera.",
+                        "hola@lhuconsultores.com",
+                        "https://lhuconsultores.com",
+                        15,
+                    ),
+                    (
+                        "Ferretería El Puente",
+                        "materiales",
+                        "Materiales y herramientas",
+                        "Puebla",
+                        "Cholula",
+                        500,
+                        8000,
+                        4.5,
+                        "Entrega a obra y paquetes especiales para autoconstructores.",
+                        "ventas@ferreteriaelpuente.mx",
+                        "https://ferreteriaelpuente.mx",
+                        20,
+                    ),
+                    (
+                        "Constructora Norte",
+                        "arquitectura",
+                        "Planos ejecutivos y permisos",
+                        "Monterrey",
+                        "Centro",
+                        18000,
+                        32000,
+                        4.8,
+                        "Equipo multidisciplinario especializado en vivienda progresiva.",
+                        "contacto@constructoranorte.mx",
+                        "https://constructoranorte.mx",
+                        18,
+                    ),
+                    (
+                        "Materiales Rivera",
+                        "materiales",
+                        "Concreto y block",
+                        "Querétaro",
+                        "San Pedro",
+                        400,
+                        6000,
+                        4.6,
+                        "Proveedores certificados con logística para zonas rurales.",
+                        "ventas@materialesrivera.com",
+                        "https://materialesrivera.com",
+                        22,
                     ),
                 ],
             )
@@ -526,6 +641,34 @@ def total_videos() -> int:
     return int(count)
 
 
+def list_videos(
+    *,
+    level: str | None = None,
+    category: str | None = None,
+    stage: str | None = None,
+    search: str | None = None,
+) -> list[dict[str, Any]]:
+    query = "SELECT id, title, category, youtube_id, level, stage, description, manual_step, tags FROM videos"
+    clauses: list[str] = []
+    params: list[Any] = []
+    if level:
+        clauses.append("LOWER(level) = LOWER(?)")
+        params.append(level)
+    if category:
+        clauses.append("LOWER(category) = LOWER(?)")
+        params.append(category)
+    if stage:
+        clauses.append("LOWER(stage) = LOWER(?)")
+        params.append(stage)
+    if search:
+        clauses.append("LOWER(title) LIKE ?")
+        params.append(f"%{search.lower()}%")
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    query += " ORDER BY CASE LOWER(level) WHEN 'principiante' THEN 0 WHEN 'intermedio' THEN 1 WHEN 'avanzado' THEN 2 ELSE 3 END, stage, title"
+    return fetch_rows(query, params)
+
+
 def record_manual_download(user_id: int, project_id: int) -> None:
     with get_connection() as connection:
         connection.execute(
@@ -570,6 +713,82 @@ def get_project(project_id: int) -> dict[str, Any] | None:
         "viability": row["viability"],
         "created_at": row["created_at"],
     }
+
+
+def list_providers(
+    *,
+    city: str | None = None,
+    provider_type: str | None = None,
+    price_min: float | None = None,
+    price_max: float | None = None,
+) -> list[dict[str, Any]]:
+    query = (
+        "SELECT id, name, provider_type, specialty, city, locality, price_min, price_max, rating, description, contact, portfolio_url, experience_years "
+        "FROM providers"
+    )
+    clauses: list[str] = []
+    params: list[Any] = []
+    if city:
+        clauses.append("LOWER(city) = LOWER(?)")
+        params.append(city)
+    if provider_type:
+        clauses.append("LOWER(provider_type) = LOWER(?)")
+        params.append(provider_type)
+    if price_min is not None:
+        clauses.append("(price_max IS NULL OR price_max >= ?)")
+        params.append(price_min)
+    if price_max is not None:
+        clauses.append("(price_min IS NULL OR price_min <= ?)")
+        params.append(price_max)
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    query += " ORDER BY rating DESC, price_min"
+    return fetch_rows(query, params)
+
+
+def get_provider(provider_id: int) -> dict[str, Any] | None:
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT id, name, provider_type, specialty, city, locality, price_min, price_max, rating, description, contact, portfolio_url, experience_years
+            FROM providers
+            WHERE id = ?
+            """,
+            (provider_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def create_hire_request(
+    *,
+    user_id: int,
+    project_id: int,
+    provider_id: int,
+    message: str | None = None,
+) -> int:
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO project_hires (user_id, project_id, provider_id, message)
+            VALUES (?, ?, ?, ?)
+            """,
+            (user_id, project_id, provider_id, message),
+        )
+        return int(cursor.lastrowid)
+
+
+def list_hire_requests(user_id: int) -> list[dict[str, Any]]:
+    return fetch_rows(
+        """
+        SELECT project_hires.id, project_hires.project_id, project_hires.status, project_hires.created_at,
+               providers.name AS provider_name, providers.provider_type, providers.city, providers.contact
+        FROM project_hires
+        JOIN providers ON providers.id = project_hires.provider_id
+        WHERE project_hires.user_id = ?
+        ORDER BY project_hires.created_at DESC
+        """,
+        (user_id,),
+    )
 
 
 def fetch_rows(query: str, params: Iterable[Any] | None = None) -> list[dict[str, Any]]:
