@@ -59,6 +59,7 @@ class Video:
     manual_step: str | None
     description: str | None
     embed_url: str
+    thumbnail_url: str | None
 
     @classmethod
     def from_row(cls, row: Mapping[str, Any]) -> "Video":
@@ -74,6 +75,7 @@ class Video:
             manual_step=row.get("manual_step"),
             description=row.get("description"),
             embed_url=build_youtube_embed_url(youtube_id),
+            thumbnail_url=build_youtube_thumbnail_url(youtube_id),
         )
 
 
@@ -141,3 +143,11 @@ def build_youtube_embed_url(youtube_id: str) -> str:
     base = f"https://www.youtube.com/embed/{youtube_id}"
     separator = "&" if "?" in youtube_id else "?"
     return f"{base}{separator}rel=0&modestbranding=1"
+
+
+def build_youtube_thumbnail_url(youtube_id: str) -> str | None:
+    """Return a thumbnail URL when available for the given YouTube resource."""
+
+    if youtube_id.startswith("videoseries?list="):
+        return None
+    return f"https://img.youtube.com/vi/{youtube_id}/hqdefault.jpg"

@@ -4,7 +4,11 @@ from __future__ import annotations
 from typing import Any, Iterable, Sequence
 
 from .. import database
-from ..models import build_youtube_embed_url, build_youtube_watch_url
+from ..models import (
+    build_youtube_embed_url,
+    build_youtube_thumbnail_url,
+    build_youtube_watch_url,
+)
 
 
 LEVEL_ALIASES = {
@@ -152,6 +156,7 @@ def _enrich_video(video: dict[str, Any]) -> dict[str, Any]:
     video["url"] = build_youtube_watch_url(youtube_id)
     video["watch_url"] = video["url"]
     video["embed_url"] = build_youtube_embed_url(youtube_id)
+    video["thumbnail"] = build_youtube_thumbnail_url(youtube_id)
     return video
 
 

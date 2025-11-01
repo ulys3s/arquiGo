@@ -6,6 +6,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Iterable
 
+from .data.video_catalog import VIDEO_CATALOG
+
 DB_PATH = Path(__file__).resolve().parent.parent / "construyeseguro.db"
 
 
@@ -373,55 +375,7 @@ def seed_data() -> None:
                 ],
             )
 
-        if not _has_rows(connection, "videos"):
-            connection.executemany(
-                """
-                INSERT INTO videos (title, category, youtube_id, level, description, manual_step)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    (
-                        "Cómo trazar cimientos seguros",
-                        "cimientos",
-                        "dQw4w9WgXcQ",
-                        "principiante",
-                        "Aprende a preparar el terreno y trazar cimientos resistentes.",
-                        "preparacion_terreno",
-                    ),
-                    (
-                        "Muros de block paso a paso",
-                        "estructura",
-                        "V-_O7nl0Ii0",
-                        "intermedio",
-                        "Técnicas para levantar muros rectos y alineados.",
-                        "levantamiento_muros",
-                    ),
-                    (
-                        "Instalaciones eléctricas seguras",
-                        "instalaciones",
-                        "iik25wqIuFo",
-                        "intermedio",
-                        "Recomendaciones para cableado seguro en viviendas familiares.",
-                        "instalaciones_seguras",
-                    ),
-                    (
-                        "Acabados que duran",
-                        "acabados",
-                        "N3AkSS5hXMA",
-                        "avanzado",
-                        "Consejos para aplicar acabados y pintura de larga duración.",
-                        "acabados_finales",
-                    ),
-                    (
-                        "Ventilación natural efectiva",
-                        "ventilacion",
-                        "L_jWHffIx5E",
-                        "principiante",
-                        "Diseña aperturas y ductos para una ventilación pasiva.",
-                        "ventilacion_iluminacion",
-                    ),
-                ],
-            )
+        _seed_video_catalog(connection)
 
         if not _has_rows(connection, "testimonials"):
             connection.executemany(
@@ -800,3 +754,36 @@ def fetch_rows(query: str, params: Iterable[Any] | None = None) -> list[dict[str
 def _has_rows(connection: sqlite3.Connection, table: str) -> bool:
     cursor = connection.execute(f"SELECT 1 FROM {table} LIMIT 1")
     return cursor.fetchone() is not None
+
+
+def _seed_video_catalog(connection: sqlite3.Connection) -> None:
+    """Ensure the bundled video catalog is available in the database."""
+
+    cursor = connection.execute("SELECT youtube_id FROM videos")
+    existing_ids = {row["youtube_id"] for row in cursor.fetchall()}
+    catalog_ids = {item["youtube_id"] for item in VIDEO_CATALOG}
+
+    if existing_ids == catalog_ids and len(existing_ids) == len(VIDEO_CATALOG):
+        return
+
+    connection.execute("DELETE FROM video_watch_history")
+    connection.execute("DELETE FROM videos")
+    connection.executemany(
+        """
+        INSERT INTO videos (title, category, youtube_id, level, stage, description, manual_step, tags)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                video["title"],
+                video["category"],
+                video["youtube_id"],
+                video["level"],
+                video.get("stage"),
+                video.get("description"),
+                video.get("manual_step"),
+                video.get("tags", ""),
+            )
+            for video in VIDEO_CATALOG
+        ],
+    )

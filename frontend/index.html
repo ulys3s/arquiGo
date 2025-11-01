@@ -17,6 +17,12 @@
       integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
       crossorigin=""
     ></script>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"
+    />
+    <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+    <script src="https://unpkg.com/leaflet-geometryutil@0.9.3/src/leaflet.geometryutil.js"></script>
     <link rel="stylesheet" href="/assets/styles.css" />
   </head>
   <body class="bg-slate-950 text-slate-100">
@@ -315,7 +321,31 @@
             <div class="mt-6 grid gap-6 lg:grid-cols-[2fr,1fr]">
               <div>
                 <h4 class="font-semibold uppercase tracking-wider text-xs text-emerald-400">Mapa del terreno</h4>
-                <div id="projectMap" class="mt-3 h-72 w-full overflow-hidden rounded-2xl border border-slate-800"></div>
+                <div class="mt-3 space-y-3">
+                  <div
+                    id="projectMap"
+                    class="map-shell w-full overflow-hidden rounded-3xl border border-slate-800 shadow-inner"
+                  ></div>
+                  <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
+                    <p class="max-w-xl">
+                      Dibuja el contorno del terreno directamente en el mapa para sincronizar las dimensiones de tu proyecto.
+                    </p>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span
+                        id="terrainSummary"
+                        class="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1 text-emerald-200"
+                        >Sin trazo</span
+                      >
+                      <button
+                        id="resetBoundary"
+                        type="button"
+                        class="rounded-full border border-slate-700 px-3 py-1 text-emerald-300 hover:border-emerald-300"
+                      >
+                        Limpiar trazo
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
               <aside class="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-300">
                 <h5 class="text-emerald-300">Orientación solar</h5>
@@ -410,7 +440,10 @@
           <p class="text-sm text-slate-300">
             Marca los videos como vistos para avanzar en tu manual y desbloquear el botón de "Generar manual" con recomendaciones personalizadas.
           </p>
-          <div id="videoList" class="mt-6 grid gap-6 md:grid-cols-2 xl:grid-cols-3"></div>
+          <div
+            id="videoList"
+            class="mt-6 grid gap-6 md:grid-cols-2 xl:grid-cols-3"
+          ></div>
         </div>
       </section>
 
@@ -491,8 +524,41 @@
       </section>
 
       <section class="space-y-6">
-        <h2 class="text-3xl font-bold">Testimonios</h2>
-        <div id="testimonialList" class="grid gap-4 md:grid-cols-3"></div>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h2 class="text-3xl font-bold">Testimonios</h2>
+          <p class="max-w-xl text-sm text-slate-400">
+            Personas que ya usan ConstruyeSeguro compartieron cómo los planes, videos y tableros de avance les ayudaron a terminar su vivienda.
+          </p>
+        </div>
+        <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6">
+          <div class="relative">
+            <div id="testimonialCarousel" class="overflow-hidden">
+              <div
+                id="testimonialList"
+                class="flex gap-4 overflow-x-auto scroll-smooth snap-x snap-mandatory pb-6"
+              ></div>
+            </div>
+            <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
+              <span id="testimonialStatus">0 de 0 historias</span>
+              <div class="flex gap-2">
+                <button
+                  id="testimonialPrev"
+                  type="button"
+                  class="rounded-full border border-slate-700 px-3 py-1 text-emerald-200 hover:border-emerald-300"
+                >
+                  Anterior
+                </button>
+                <button
+                  id="testimonialNext"
+                  type="button"
+                  class="rounded-full border border-slate-700 px-3 py-1 text-emerald-200 hover:border-emerald-300"
+                >
+                  Siguiente
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
     </main>
 

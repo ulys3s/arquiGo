@@ -1,5 +1,23 @@
 const API_BASE = "/api";
 
+const DEFAULT_TESTIMONIALS = [
+  {
+    author: "María y Antonio",
+    location: "Querétaro",
+    quote: "Seguimos cada plano y ahora vivimos en una casa segura para nuestra familia.",
+  },
+  {
+    author: "Rocío",
+    location: "Jalisco",
+    quote: "Los videos y el mapa interactivo hicieron que coordinar a los albañiles fuera más sencillo.",
+  },
+  {
+    author: "Familia López",
+    location: "Chiapas",
+    quote: "Marcamos el terreno y descargamos los planos en PDF para compartirlos con el maestro de obra.",
+  },
+];
+
 const state = {
   token: localStorage.getItem("cs_token") || "",
   user: JSON.parse(localStorage.getItem("cs_user") || "null"),
@@ -8,6 +26,9 @@ const state = {
   blueprintZoom: 1,
   providers: [],
   selectedProvider: null,
+  terrainBoundary: null,
+  testimonials: [],
+  testimonialIndex: 0,
 };
 
 const geoIndex = {
@@ -69,6 +90,10 @@ const elements = {
   localitySelect: document.querySelector("select[name='localidad']"),
   preferencesChips: document.querySelectorAll("input[name='preferencias']"),
   projectMap: document.querySelector("#projectMap"),
+  terrainSummary: document.querySelector("#terrainSummary"),
+  resetBoundary: document.querySelector("#resetBoundary"),
+  terrainWidthSelect: document.querySelector("select[name='ancho_terreno']"),
+  terrainLengthSelect: document.querySelector("select[name='largo_terreno']"),
   solarOrientation: document.querySelector("#solarOrientation"),
   siteRecommendations: document.querySelector("#siteRecommendations"),
   providerList: document.querySelector("#providerList"),
@@ -84,10 +109,16 @@ const elements = {
   hireProjectSelect: document.querySelector("#hireProject"),
   hireMessage: document.querySelector("#hireMessage"),
   hireRequestList: document.querySelector("#hireRequestList"),
+  testimonialList: document.querySelector("#testimonialList"),
+  testimonialPrev: document.querySelector("#testimonialPrev"),
+  testimonialNext: document.querySelector("#testimonialNext"),
+  testimonialStatus: document.querySelector("#testimonialStatus"),
+  testimonialCarousel: document.querySelector("#testimonialCarousel"),
 };
 
 let projectMapInstance;
 let projectZoneLayer;
+let projectBoundaryLayer;
 
 document.addEventListener("DOMContentLoaded", () => {
   attachAuthHandlers();
@@ -95,11 +126,25 @@ document.addEventListener("DOMContentLoaded", () => {
   attachVideoHandlers();
   attachBlueprintToolbar();
   attachMarketplaceHandlers();
-  hydrateAuthState();
+  attachTerrainControls();
+  attachTestimonialControls();
   initLocationControls();
   initProjectMap();
+  observeProjectResultsVisibility();
+  hydrateAuthState();
   loadProviders().catch(console.error);
+  loadTestimonials().catch(console.error);
+  if (!state.token) renderVideoLibrary([], { requireAuth: true });
   setBlueprintZoom(state.blueprintZoom);
+  updateTerrainSummary();
+  adjustMapShellHeight();
+  window.addEventListener(
+    "resize",
+    debounce(() => {
+      adjustMapShellHeight();
+      projectMapInstance?.invalidateSize();
+    }, 200)
+  );
   elements.refreshManual?.addEventListener("click", () => {
     if (ensureAuth()) loadManualLevels();
   });
@@ -202,6 +247,19 @@ function attachMarketplaceHandlers() {
   elements.hireForm?.addEventListener("submit", handleHireSubmit);
 }
 
+function attachTerrainControls() {
+  elements.resetBoundary?.addEventListener("click", () => clearTerrainBoundary());
+  [elements.terrainWidthSelect, elements.terrainLengthSelect]
+    .filter(Boolean)
+    .forEach((select) => select.addEventListener("change", () => syncMapFromTerrain()));
+}
+
+function attachTestimonialControls() {
+  elements.testimonialPrev?.addEventListener("click", () => scrollTestimonials(-1));
+  elements.testimonialNext?.addEventListener("click", () => scrollTestimonials(1));
+  elements.testimonialList?.addEventListener("scroll", debounce(handleTestimonialScroll, 150));
+}
+
 async function authenticateUser(endpoint, formData) {
   try {
     const response = await fetch(endpoint, {
@@ -246,6 +304,7 @@ function clearAuthState() {
   state.token = "";
   state.user = null;
   state.currentProjectId = null;
+  state.terrainBoundary = null;
   localStorage.removeItem("cs_token");
   localStorage.removeItem("cs_user");
   updateUserBadge();
@@ -263,6 +322,7 @@ function clearAuthState() {
   if (elements.hireRequestList)
     elements.hireRequestList.innerHTML =
       '<p class="text-sm text-slate-400">Inicia sesión para llevar control de tus solicitudes.</p>';
+  clearTerrainBoundary();
 }
 
 function updateUserBadge() {
@@ -315,6 +375,9 @@ function formDataToJSON(formData) {
   ["presupuesto", "largo_terreno", "ancho_terreno", "personas", "plantas"].forEach((field) => {
     if (payload[field] !== undefined) payload[field] = Number(payload[field]);
   });
+  if (state.terrainBoundary) {
+    payload.boundary = state.terrainBoundary;
+  }
   return payload;
 }
 
@@ -428,9 +491,21 @@ function renderProjectList(projects) {
 
 function renderProject(data) {
   elements.projectResults?.classList.remove("hidden");
+  adjustMapShellHeight();
+  setTimeout(() => projectMapInstance?.invalidateSize(), 150);
   elements.viabilityScore.textContent = `Viabilidad ${Math.round(
     data.viability.score * 100
   )}% · ${data.viability.message}`;
+
+  const terrain = data.overview?.terrain;
+  if (terrain) {
+    if (elements.terrainWidthSelect && terrain.width) {
+      elements.terrainWidthSelect.value = String(terrain.width);
+    }
+    if (elements.terrainLengthSelect && terrain.length) {
+      elements.terrainLengthSelect.value = String(terrain.length);
+    }
+  }
 
   if (elements.blueprint2D) {
     elements.blueprint2D.innerHTML = data.plans.selected.blueprint_2d.svg;
@@ -571,9 +646,12 @@ function renderBlueprintLegend() {
   elements.blueprintLegend.innerHTML = state.blueprintRooms
     .map(
       (room) => `
-        <li class="flex items-center gap-3 text-xs">
-          <span class="h-3 w-3 rounded-full" style="background:${room.style.fill}"></span>
-          <span>${room.name}</span>
+        <li class="flex items-center justify-between gap-3 text-xs">
+          <div class="flex items-center gap-3">
+            <span class="h-3 w-3 rounded-full" style="background:${room.style.fill}"></span>
+            <span>${room.name}</span>
+          </div>
+          <div class="text-[10px] text-slate-400">${room.labels?.dimensions || ""} · ${room.area} m²</div>
         </li>
       `
     )
@@ -615,60 +693,149 @@ async function loadManualLevels() {
 }
 
 async function loadVideos() {
-  if (!ensureAuth(false)) return;
+  if (!state.token) {
+    renderVideoLibrary([], { requireAuth: true });
+    return;
+  }
   const params = new URLSearchParams();
   if (elements.videoFilterLevel?.value) params.set("level", elements.videoFilterLevel.value);
   if (elements.videoFilterSearch?.value) params.set("search", elements.videoFilterSearch.value);
   const query = params.toString();
-  const response = await fetchWithAuth(`${API_BASE}/videos${query ? `?${query}` : ""}`);
-  const data = await response.json();
-  if (!response.ok || !data.success) return;
-  const { videos } = data;
-  renderVideoLibrary(videos);
+  try {
+    const response = await fetchWithAuth(`${API_BASE}/videos${query ? `?${query}` : ""}`);
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || "No pudimos cargar los videos");
+    const { videos } = data;
+    renderVideoLibrary(videos);
+  } catch (error) {
+    console.error(error);
+    renderVideoLibrary([], { error: true });
+  }
 }
 
-function renderVideoLibrary(videos) {
+function renderVideoLibrary(videos, { requireAuth = false, error = false } = {}) {
   if (!elements.videoContainer) return;
+  if (requireAuth) {
+    elements.videoContainer.innerHTML = `
+      <div class="rounded-3xl border border-slate-800/80 bg-slate-900/60 p-6 text-sm text-slate-300">
+        <p class="font-semibold text-emerald-200">Inicia sesión para sincronizar tu progreso.</p>
+        <p class="mt-2">Accede con tu cuenta para marcar videos como vistos y guardar tu avance en el manual constructivo.</p>
+      </div>
+    `;
+    return;
+  }
+  if (error) {
+    elements.videoContainer.innerHTML = `
+      <div class="rounded-3xl border border-amber-500/30 bg-amber-500/10 p-6 text-sm text-amber-200">
+        No pudimos cargar la biblioteca de videos en este momento. Intenta nuevamente más tarde.
+      </div>
+    `;
+    return;
+  }
   if (!videos.length) {
     elements.videoContainer.innerHTML = `<p class="text-sm text-slate-400">No encontramos videos con esos filtros.</p>`;
     return;
   }
   elements.videoContainer.innerHTML = videos
-    .map(
-      (group) => `
-        <section class="space-y-4">
+    .map((group) => {
+      const cards = group.videos
+        .map((video) => {
+          const thumbnail = video.thumbnail || "/assets/video-placeholder.svg";
+          const manualStep = (video.manual_step || "general").replace(/_/g, " ");
+          const watched = Boolean(video.watched);
+          const embedUrl = video.embed_url || `https://www.youtube.com/embed/${video.youtube_id}`;
+          const directUrl = video.url || `https://www.youtube.com/watch?v=${video.youtube_id}`;
+          const watchClasses = watched
+            ? "bg-slate-800 text-emerald-200 border border-emerald-500/30"
+            : "bg-emerald-500 text-slate-950";
+          return `
+            <article class="video-card rounded-3xl border border-slate-800/80 bg-slate-900/70 p-5 shadow-lg shadow-emerald-500/10">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <h4 class="text-lg font-semibold text-slate-100">${video.title}</h4>
+                  <p class="mt-1 text-xs text-slate-400">${video.description || ""}</p>
+                </div>
+                <span class="rounded-full bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200">${group.label}</span>
+              </div>
+              <div class="video-frame mt-2" data-video-frame>
+                <iframe src="${embedUrl}" title="${video.title}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy"></iframe>
+                <div class="video-fallback hidden">
+                  <img src="${thumbnail}" alt="Vista previa de ${video.title}" />
+                  <p class="text-xs text-slate-200">No pudimos cargar la vista previa. Puedes abrir el video directamente en YouTube.</p>
+                  <a class="rounded-full border border-emerald-400/60 px-4 py-2 text-xs font-semibold text-emerald-200" href="${directUrl}" target="_blank" rel="noopener">
+                    Ver en YouTube
+                  </a>
+                </div>
+              </div>
+              <dl class="mt-3 grid gap-1 text-xs text-slate-400">
+                <div class="flex items-center justify-between">
+                  <dt>Etapa</dt>
+                  <dd class="text-emerald-200">${video.stage || "General"}</dd>
+                </div>
+                <div class="flex items-center justify-between">
+                  <dt>Manual</dt>
+                  <dd>${manualStep}</dd>
+                </div>
+              </dl>
+              <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                <a class="inline-flex items-center gap-1 text-emerald-300" href="${directUrl}" target="_blank" rel="noopener">
+                  Ver en YouTube
+                </a>
+              </div>
+              <button
+                class="mt-auto w-full rounded-full ${watchClasses} px-4 py-2 text-sm font-semibold"
+                data-watch-video="${video.id}"
+                aria-pressed="${watched}"
+              >
+                ${watched ? "Marcado como visto" : "Marcar como visto"}
+              </button>
+            </article>
+          `;
+        })
+        .join("");
+      return `
+        <section class="video-level rounded-3xl border border-slate-800 bg-slate-900/60 p-5" data-level="${group.level}">
           <header class="flex flex-wrap items-center justify-between gap-3">
-            <h3 class="text-xl font-semibold text-emerald-300">${group.label}</h3>
-            <span class="text-xs uppercase tracking-wider text-slate-400">${group.videos.length} videos</span>
+            <div>
+              <h3 class="text-xl font-semibold text-emerald-300">${group.label}</h3>
+              <p class="text-xs text-slate-400">Aprende paso a paso según tu nivel de experiencia.</p>
+            </div>
+            <span class="rounded-full bg-slate-800/70 px-3 py-1 text-xs uppercase tracking-wide text-slate-300">${group.videos.length} videos</span>
           </header>
-          <div class="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-            ${group.videos
-              .map(
-                (video) => `
-                  <article class="rounded-3xl border border-slate-800 bg-slate-900/60 p-4">
-                    <header class="flex items-center justify-between gap-3">
-                      <h4 class="text-lg font-semibold text-slate-100">${video.title}</h4>
-                      <span class="rounded-full bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200">${group.label}</span>
-                    </header>
-                    <div class="mt-3 overflow-hidden rounded-xl">
-                      <iframe class="aspect-video w-full" src="${video.embed_url || `https://www.youtube.com/embed/${video.youtube_id}` }" allowfullscreen loading="lazy" title="${video.title}"></iframe>
-                    </div>
-                    <p class="mt-3 text-sm text-slate-300">${video.description || ""}</p>
-                    <p class="mt-2 text-xs text-slate-400">Etapa: ${video.stage || "General"}</p>
-                    <p class="text-xs text-slate-500">Manual: ${(video.manual_step || "general").replace(/_/g, " ")}</p>
-                    <button class="mt-3 w-full rounded-full ${video.watched ? "bg-slate-800 text-emerald-200" : "bg-emerald-500 text-slate-950"} px-4 py-2 text-sm font-semibold" data-watch-video="${video.id}">
-                      ${video.watched ? "Marcado como visto" : "Marcar como visto"}
-                    </button>
-                  </article>
-                `
-              )
-              .join("")}
+          <div class="video-grid mt-4">
+            ${cards}
           </div>
         </section>
-      `
-    )
+      `;
+    })
     .join("");
   attachWatchButtons(elements.videoContainer);
+  enhanceVideoEmbeds(elements.videoContainer);
+}
+
+function enhanceVideoEmbeds(root) {
+  if (!root) return;
+  root.querySelectorAll(".video-frame").forEach((frame) => {
+    const iframe = frame.querySelector("iframe");
+    const fallback = frame.querySelector(".video-fallback");
+    if (!iframe || !fallback) return;
+    let loaded = false;
+    const timeout = setTimeout(() => {
+      if (!loaded) {
+        iframe.classList.add("hidden");
+        fallback.classList.remove("hidden");
+      }
+    }, 5500);
+    iframe.addEventListener("load", () => {
+      loaded = true;
+      clearTimeout(timeout);
+    });
+    iframe.addEventListener("error", () => {
+      clearTimeout(timeout);
+      iframe.classList.add("hidden");
+      fallback.classList.remove("hidden");
+    });
+  });
 }
 
 function renderPlaylist(container, playlist, { compact = false, emptyMessage = "" } = {}) {
@@ -702,8 +869,13 @@ function renderPlaylist(container, playlist, { compact = false, emptyMessage = "
                       <div class="rounded-2xl border border-slate-800 bg-slate-900/40 p-3">
                         <p class="text-sm font-semibold text-slate-100">${video.title}</p>
                         <p class="text-xs text-slate-400">${video.description}</p>
-                        <div class="mt-3 overflow-hidden rounded-xl">
+                        <div class="video-frame mt-3" data-video-frame>
                           <iframe class="aspect-video w-full" src="${video.embed_url || `https://www.youtube.com/embed/${video.youtube_id}` }" title="${video.title}" allowfullscreen loading="lazy"></iframe>
+                          <div class="video-fallback hidden">
+                            <img src="${video.thumbnail || "/assets/video-placeholder.svg"}" alt="Vista previa de ${video.title}" />
+                            <p class="text-xs text-slate-200">Vista previa no disponible, ábrelo en YouTube.</p>
+                            <a class="rounded-full border border-emerald-400/60 px-3 py-1 text-xs text-emerald-200" href="${video.url || `https://www.youtube.com/watch?v=${video.youtube_id}` }" target="_blank" rel="noopener">Ver en YouTube</a>
+                          </div>
                         </div>
                         <button class="mt-3 rounded-full bg-emerald-500 px-4 py-2 text-xs font-semibold text-slate-950" data-watch-video="${video.id}">Marcar como visto</button>
                       </div>
@@ -716,12 +888,14 @@ function renderPlaylist(container, playlist, { compact = false, emptyMessage = "
     )
     .join("");
   attachWatchButtons(container);
+  enhanceVideoEmbeds(container);
 }
 
 function attachWatchButtons(root) {
   if (!root) return;
   root.querySelectorAll("[data-watch-video]").forEach((button) => {
     button.addEventListener("click", () => {
+      if (button.getAttribute("aria-pressed") === "true") return;
       const videoId = Number(button.dataset.watchVideo);
       markVideoAsWatched(videoId, button);
     });
@@ -736,6 +910,7 @@ async function markVideoAsWatched(videoId, button) {
     button.textContent = "Marcado como visto";
     button.classList.remove("bg-emerald-500", "text-slate-950");
     button.classList.add("bg-slate-800", "text-emerald-200");
+    button.setAttribute("aria-pressed", "true");
   }
   const { progress } = await response.json();
   if (elements.projectProgressBar) elements.projectProgressBar.style.width = `${Math.round(progress * 100)}%`;
@@ -780,14 +955,14 @@ async function downloadBlueprint(format) {
 function convertSvgToPng(svg) {
   return new Promise((resolve, reject) => {
     const serializer = new XMLSerializer();
-    const source = serializer.serializeToString(svg);
-    const viewBox = (svg.getAttribute("viewBox") || `0 0 ${svg.clientWidth || 1024} ${svg.clientHeight || 768}`).split(" ");
-    const width = Number(viewBox[2]);
-    const height = Number(viewBox[3]);
-    const canvas = document.createElement("canvas");
-    const scale = window.devicePixelRatio > 1 ? 2 : 1.5;
-    canvas.width = width * scale;
-    canvas.height = height * scale;
+  const source = serializer.serializeToString(svg);
+  const viewBox = (svg.getAttribute("viewBox") || `0 0 ${svg.clientWidth || 1024} ${svg.clientHeight || 768}`).split(" ");
+  const width = Number(viewBox[2]);
+  const height = Number(viewBox[3]);
+  const canvas = document.createElement("canvas");
+  const scale = Math.max(3, window.devicePixelRatio || 1);
+  canvas.width = width * scale;
+  canvas.height = height * scale;
     const context = canvas.getContext("2d");
     const image = new Image();
     image.onload = () => {
@@ -837,8 +1012,13 @@ function openPdfPreview(imageDataUrl, width, height) {
 
 function initLocationControls() {
   if (!elements.citySelect || !elements.localitySelect) return;
-  elements.citySelect.addEventListener("change", () => populateLocalities());
+  elements.citySelect.addEventListener("change", () => {
+    populateLocalities();
+    focusMapOnLocation(true);
+  });
+  elements.localitySelect.addEventListener("change", () => focusMapOnLocation());
   populateLocalities();
+  focusMapOnLocation();
 }
 
 function populateLocalities() {
@@ -848,13 +1028,180 @@ function populateLocalities() {
   elements.localitySelect.innerHTML = ["<option value=''>Selecciona</option>", ...localities.map((loc) => `<option value="${loc}">${loc}</option>`)].join("");
 }
 
+function focusMapOnLocation(clearBoundary = false) {
+  if (!projectMapInstance || !elements.citySelect) return;
+  const city = elements.citySelect.value;
+  const locality = elements.localitySelect?.value;
+  const cityEntry = geoIndex[city];
+  const target = locality && cityEntry ? cityEntry[locality] : cityEntry ? Object.values(cityEntry)[0] : null;
+  if (!target) return;
+  projectMapInstance.setView([target.lat, target.lng], 15);
+  if (clearBoundary) {
+    clearTerrainBoundary(true);
+    updateTerrainSummary();
+  }
+}
+
+function updateTerrainSummary(info) {
+  if (!elements.terrainSummary) return;
+  if (!info) {
+    elements.terrainSummary.textContent = "Sin trazo";
+    elements.terrainSummary.classList.remove("border-emerald-400/60", "text-emerald-100");
+    elements.terrainSummary.classList.add("text-emerald-200");
+    return;
+  }
+  const width = Number(info.width || 0);
+  const length = Number(info.length || 0);
+  const area = Number(info.area || 0);
+  elements.terrainSummary.textContent = `${width.toFixed(1)} m × ${length.toFixed(1)} m · ${Math.round(area).toLocaleString()} m²`;
+  elements.terrainSummary.classList.remove("text-emerald-200");
+  elements.terrainSummary.classList.add("border-emerald-400/60", "text-emerald-100");
+}
+
+function clearTerrainBoundary(skipSummary = false) {
+  state.terrainBoundary = null;
+  projectBoundaryLayer?.clearLayers();
+  if (!skipSummary) updateTerrainSummary();
+}
+
+function adjustMapShellHeight() {
+  if (!elements.projectMap) return;
+  const minHeight = 320;
+  const maxHeight = 540;
+  const viewportTarget = window.innerHeight ? window.innerHeight * 0.45 : minHeight;
+  const height = Math.min(Math.max(viewportTarget, minHeight), maxHeight);
+  elements.projectMap.style.setProperty("--map-shell-height", `${Math.round(height)}px`);
+}
+
+function observeProjectResultsVisibility() {
+  if (!elements.projectResults || typeof MutationObserver === "undefined") return;
+  const observer = new MutationObserver(() => {
+    if (!elements.projectResults.classList.contains("hidden")) {
+      setTimeout(() => {
+        adjustMapShellHeight();
+        projectMapInstance?.invalidateSize();
+      }, 150);
+    }
+  });
+  observer.observe(elements.projectResults, { attributes: true, attributeFilter: ["class"] });
+}
+
 function initProjectMap() {
   if (!elements.projectMap || typeof L === "undefined") return;
   projectMapInstance = L.map(elements.projectMap).setView([19.4326, -99.1332], 13);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: "© OpenStreetMap",
   }).addTo(projectMapInstance);
+  projectBoundaryLayer = L.featureGroup().addTo(projectMapInstance);
   projectZoneLayer = L.layerGroup().addTo(projectMapInstance);
+  if (L.Draw) {
+    const drawControl = new L.Control.Draw({
+      draw: {
+        marker: false,
+        circle: false,
+        polyline: false,
+        circlemarker: false,
+        polygon: {
+          allowIntersection: false,
+          shapeOptions: { color: "#22c55e", fillColor: "#22c55e", fillOpacity: 0.1, weight: 2 },
+        },
+        rectangle: {
+          shapeOptions: { color: "#22c55e", fillColor: "#22c55e", fillOpacity: 0.1, weight: 2 },
+        },
+      },
+      edit: {
+        featureGroup: projectBoundaryLayer,
+        remove: true,
+      },
+    });
+    projectMapInstance.addControl(drawControl);
+    projectMapInstance.on(L.Draw.Event.CREATED, (event) => {
+      projectBoundaryLayer.clearLayers();
+      projectBoundaryLayer.addLayer(event.layer);
+      syncTerrainFromMap(event.layer);
+    });
+    projectMapInstance.on(L.Draw.Event.EDITED, (event) => {
+      event.layers.eachLayer((layer) => syncTerrainFromMap(layer));
+    });
+    projectMapInstance.on(L.Draw.Event.DELETED, () => {
+      clearTerrainBoundary();
+    });
+  }
+
+  projectMapInstance.whenReady(() => {
+    adjustMapShellHeight();
+    setTimeout(() => projectMapInstance.invalidateSize(), 150);
+  });
+}
+
+function syncTerrainFromMap(layer, { updateSelects = true } = {}) {
+  if (!projectMapInstance || !layer) return;
+  const bounds = layer.getBounds?.();
+  if (!bounds?.isValid()) return;
+  const southWest = bounds.getSouthWest();
+  const southEast = L.latLng(southWest.lat, bounds.getEast());
+  const northWest = L.latLng(bounds.getNorth(), southWest.lng);
+  const width = projectMapInstance.distance(southWest, southEast);
+  const length = projectMapInstance.distance(southWest, northWest);
+  let area = width * length;
+  if (layer.getLatLngs) {
+    const latlngs = layer.getLatLngs()[0] || [];
+    if (latlngs.length && L.GeometryUtil?.geodesicArea) {
+      area = Math.abs(L.GeometryUtil.geodesicArea(latlngs));
+    }
+  }
+  updateTerrainSummary({ width, length, area });
+  state.terrainBoundary = layer.toGeoJSON();
+  state.terrainBoundary.properties = {
+    width_m: Number(width.toFixed(2)),
+    length_m: Number(length.toFixed(2)),
+    area_m2: Number(area.toFixed(2)),
+  };
+  if (updateSelects) {
+    setClosestSelect(elements.terrainWidthSelect, width);
+    setClosestSelect(elements.terrainLengthSelect, length);
+  }
+}
+
+function syncMapFromTerrain() {
+  if (!projectMapInstance || !projectBoundaryLayer) return;
+  const width = Number(elements.terrainWidthSelect?.value);
+  const length = Number(elements.terrainLengthSelect?.value);
+  if (!width || !length) return;
+  const center = projectMapInstance.getCenter();
+  const metersPerDegreeLat = 111320;
+  const metersPerDegreeLon = Math.max(111320 * Math.cos((center.lat * Math.PI) / 180), 1e-6);
+  const latDelta = (length / 2) / metersPerDegreeLat;
+  const lonDelta = (width / 2) / metersPerDegreeLon;
+  const bounds = [
+    [center.lat - latDelta, center.lng - lonDelta],
+    [center.lat + latDelta, center.lng + lonDelta],
+  ];
+  projectBoundaryLayer.clearLayers();
+  const rectangle = L.rectangle(bounds, {
+    color: "#22c55e",
+    weight: 2,
+    fillColor: "#22c55e",
+    fillOpacity: 0.12,
+  });
+  projectBoundaryLayer.addLayer(rectangle);
+  syncTerrainFromMap(rectangle, { updateSelects: false });
+}
+
+function setClosestSelect(select, value) {
+  if (!select || !value) return;
+  let closestValue = null;
+  let minDiff = Infinity;
+  Array.from(select.options).forEach((option) => {
+    const numeric = Number(option.value);
+    if (!numeric) return;
+    const diff = Math.abs(numeric - value);
+    if (diff < minDiff) {
+      minDiff = diff;
+      closestValue = option.value;
+    }
+  });
+  if (closestValue) select.value = closestValue;
 }
 
 async function loadProviders() {
@@ -982,6 +1329,61 @@ function updateHireProjectOptions(projects) {
     .join("");
 }
 
+async function loadTestimonials() {
+  if (!elements.testimonialList) return;
+  try {
+    const response = await fetch(`${API_BASE}/testimonials`);
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      if (!state.testimonials.length) {
+        state.testimonials = DEFAULT_TESTIMONIALS.slice();
+        renderTestimonials();
+      }
+      return;
+    }
+    const testimonials = Array.isArray(data.testimonials)
+      ? data.testimonials
+      : [];
+    state.testimonials = testimonials.length ? testimonials : DEFAULT_TESTIMONIALS.slice();
+    renderTestimonials();
+  } catch (error) {
+    console.error(error);
+    if (!state.testimonials.length) {
+      state.testimonials = DEFAULT_TESTIMONIALS.slice();
+      renderTestimonials();
+    }
+  }
+}
+
+function renderTestimonials() {
+  if (!elements.testimonialList) return;
+  if (!state.testimonials.length) {
+    elements.testimonialList.innerHTML = `<p class="text-sm text-slate-400">Aún no hay testimonios disponibles.</p>`;
+    updateTestimonialStatus();
+    return;
+  }
+  elements.testimonialList.innerHTML = state.testimonials
+    .map((item, index) => {
+      const initials = buildInitials(item.author || "ConstruyeSeguro");
+      return `
+        <article class="testimonial-card" data-index="${index}">
+          <div class="flex items-center gap-3">
+            <div class="testimonial-avatar">${initials}</div>
+            <div>
+              <p class="text-sm font-semibold text-emerald-200">${item.author}</p>
+              <p class="text-xs uppercase tracking-wide text-slate-400">${item.location || ""}</p>
+            </div>
+          </div>
+          <p class="mt-4 text-sm leading-relaxed text-slate-200">“${item.quote}”</p>
+        </article>
+      `;
+    })
+    .join("");
+  state.testimonialIndex = 0;
+  elements.testimonialList.scrollLeft = 0;
+  updateTestimonialStatus();
+}
+
 function updateProjectMap(site, terrain) {
   if (!projectMapInstance || !site) return;
   const { lat, lng } = site.coordinates;
@@ -992,8 +1394,8 @@ function updateProjectMap(site, terrain) {
     radius,
     color: "#22c55e",
     fillColor: "#22c55e",
-    fillOpacity: 0.15,
-    weight: 2,
+    fillOpacity: 0.12,
+    weight: 1.6,
   }).addTo(projectZoneLayer);
   L.marker([lat, lng], { title: "Zona de construcción" }).addTo(projectZoneLayer);
   L.polyline(
@@ -1004,6 +1406,28 @@ function updateProjectMap(site, terrain) {
     ],
     { color: "#fbbf24", weight: 3, dashArray: "8,6" }
   ).addTo(projectZoneLayer);
+  const boundaryGeo = terrain?.boundary || site.boundary;
+  if (projectBoundaryLayer) projectBoundaryLayer.clearLayers();
+  state.terrainBoundary = null;
+  if (boundaryGeo) {
+    const boundaryLayer = L.geoJSON(boundaryGeo, {
+      style: () => ({ color: "#22c55e", weight: 2, fillColor: "#22c55e", fillOpacity: 0.16 }),
+    });
+    boundaryLayer.eachLayer((layer) => projectBoundaryLayer.addLayer(layer));
+    const layer = projectBoundaryLayer.getLayers()[0];
+    if (layer) {
+      projectMapInstance.fitBounds(layer.getBounds(), { padding: [32, 32] });
+      syncTerrainFromMap(layer);
+    }
+  } else if (terrain?.width && terrain?.length) {
+    const width = Number(terrain.width);
+    const length = Number(terrain.length);
+    const area = Number(terrain.area || width * length);
+    updateTerrainSummary({ width, length, area });
+    syncMapFromTerrain();
+  } else {
+    updateTerrainSummary();
+  }
   if (elements.solarOrientation) {
     elements.solarOrientation.textContent = site.solar;
   }
@@ -1012,6 +1436,7 @@ function updateProjectMap(site, terrain) {
       .map((tip) => `<li>${tip}</li>`)
       .join("");
   }
+  setTimeout(() => projectMapInstance?.invalidateSize(), 120);
 }
 
 function debounce(fn, wait) {
@@ -1020,6 +1445,49 @@ function debounce(fn, wait) {
     clearTimeout(timeout);
     timeout = setTimeout(() => fn.apply(null, args), wait);
   };
+}
+
+function buildInitials(name) {
+  if (!name) return "CS";
+  const parts = name.split(/\s+/).filter(Boolean);
+  const letters = parts.slice(0, 2).map((part) => part[0]?.toUpperCase() || "");
+  return letters.join("") || "CS";
+}
+
+function updateTestimonialStatus() {
+  if (!elements.testimonialStatus) return;
+  const total = state.testimonials.length;
+  if (!total) {
+    elements.testimonialStatus.textContent = "Sin testimonios";
+    return;
+  }
+  const current = ((state.testimonialIndex % total) + total) % total;
+  elements.testimonialStatus.textContent = `${current + 1} de ${total} historias`;
+}
+
+function scrollTestimonials(step) {
+  if (!elements.testimonialList || !state.testimonials.length) return;
+  state.testimonialIndex = (state.testimonialIndex + step + state.testimonials.length) % state.testimonials.length;
+  const target = elements.testimonialList.children[state.testimonialIndex];
+  target?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+  updateTestimonialStatus();
+}
+
+function handleTestimonialScroll() {
+  if (!elements.testimonialList || !state.testimonials.length) return;
+  const containerRect = elements.testimonialList.getBoundingClientRect();
+  let closestIndex = 0;
+  let minDistance = Infinity;
+  Array.from(elements.testimonialList.children).forEach((child, index) => {
+    const rect = child.getBoundingClientRect();
+    const distance = Math.abs(rect.left + rect.width / 2 - (containerRect.left + containerRect.width / 2));
+    if (distance < minDistance) {
+      minDistance = distance;
+      closestIndex = index;
+    }
+  });
+  state.testimonialIndex = closestIndex;
+  updateTestimonialStatus();
 }
 
 function capitalize(text) {
