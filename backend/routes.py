@@ -5,11 +5,13 @@ import secrets
 from functools import wraps
 from http import HTTPStatus
 from pathlib import Path
+from typing import Any
 
 from flask import Blueprint, Response, current_app, g, jsonify, make_response, request, send_file
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import database
+from .models import Provider, User, Video
 from .services import financing, manual_builder, plan_generator, youtube_service
 from .validation import validate_project_payload
 
@@ -59,7 +61,8 @@ def require_auth(handler):
     @wraps(handler)
     def wrapper(*args, **kwargs):
         token = _extract_token()
-        user = database.get_user_by_token(token)
+        user_row = database.get_user_by_token(token)
+        user: User | None = User.from_row(user_row) if user_row else None
         if not user:
             return (
                 jsonify({"success": False, "error": "Autenticación requerida"}),
@@ -192,7 +195,7 @@ def logout() -> Response:
 @api_bp.get("/projects")
 @require_auth
 def list_projects() -> Response:
-    user_id = int(g.current_user["id"])
+    user_id = g.current_user.id
     projects = database.list_user_projects(user_id)
     watched_ids = database.get_watched_video_ids(user_id)
     total_videos = max(database.total_videos(), 1)
@@ -214,26 +217,33 @@ def list_projects() -> Response:
 @api_bp.get("/dashboard")
 @require_auth
 def dashboard() -> Response:
-    user_id = int(g.current_user["id"])
+    user_id = g.current_user.id
     projects = database.list_user_projects(user_id)
     watched_ids = database.get_watched_video_ids(user_id)
     total_videos = max(database.total_videos(), 1)
     progress = round(len(watched_ids) / total_videos, 2)
     recommended = youtube_service.recommended_videos_for_user(
-        g.current_user,
+        {
+            "id": g.current_user.id,
+            "email": g.current_user.email,
+            "full_name": g.current_user.full_name,
+            "city": g.current_user.city,
+            "project_type": g.current_user.project_type,
+        },
         projects,
         watched_ids,
     )
+    hire_requests = database.list_hire_requests(user_id)
 
     return jsonify(
         {
             "success": True,
             "user": {
-                "id": g.current_user["id"],
-                "email": g.current_user["email"],
-                "full_name": g.current_user.get("full_name"),
-                "city": g.current_user.get("city"),
-                "project_type": g.current_user.get("project_type"),
+                "id": g.current_user.id,
+                "email": g.current_user.email,
+                "full_name": g.current_user.full_name,
+                "city": g.current_user.city,
+                "project_type": g.current_user.project_type,
             },
             "projects": projects,
             "progress": {
@@ -242,6 +252,7 @@ def dashboard() -> Response:
                 "percentage": progress,
             },
             "recommended_videos": recommended,
+            "hire_requests": hire_requests,
         }
     )
 
@@ -254,7 +265,7 @@ def create_project() -> tuple[Response, int]:
     generated = plan_generator.generate_project_package(project_data)
 
     project_title = payload.get("title") or f"Proyecto {project_data['ciudad']}"
-    user_id = int(g.current_user["id"])
+    user_id = g.current_user.id
     project_id = database.create_user_project(
         user_id=user_id,
         title=project_title,
@@ -280,7 +291,7 @@ def create_project() -> tuple[Response, int]:
 @api_bp.get("/projects/<int:project_id>")
 @require_auth
 def get_project(project_id: int) -> tuple[Response, int]:
-    user_id = int(g.current_user["id"])
+    user_id = g.current_user.id
     project = database.get_user_project(project_id, user_id)
     if project is None:
         return jsonify({"success": False, "error": "Proyecto no encontrado"}), HTTPStatus.NOT_FOUND
@@ -302,7 +313,7 @@ def get_project(project_id: int) -> tuple[Response, int]:
 @api_bp.get("/projects/<int:project_id>/manual/pdf")
 @require_auth
 def download_manual(project_id: int):
-    user_id = int(g.current_user["id"])
+    user_id = g.current_user.id
     project = database.get_user_project(project_id, user_id)
     if project is None:
         return jsonify({"success": False, "error": "Proyecto no encontrado"}), HTTPStatus.NOT_FOUND
@@ -332,32 +343,62 @@ def preview_plan() -> Response:
 # Video library
 # ---------------------------------------------------------------------------
 VIDEO_LEVEL_ORDER = {"principiante": 0, "intermedio": 1, "avanzado": 2}
+VIDEO_LEVEL_LABELS = {
+    "principiante": "Fácil / Principiante",
+    "intermedio": "Nivel Intermedio",
+    "avanzado": "Nivel Avanzado",
+}
 
 
 @api_bp.get("/videos")
 @require_auth
 def list_videos() -> Response:
-    level = request.args.get("level")
+    level_filter = (request.args.get("level") or "").lower() or None
     category = request.args.get("category")
+    stage = request.args.get("stage")
     search = request.args.get("search")
-    rows = youtube_service.list_videos(category=category, search=search)
+    rows = database.list_videos(level=level_filter, category=category, stage=stage, search=search)
+    watched_ids = database.get_watched_video_ids(g.current_user.id)
 
-    if level:
-        rows = [row for row in rows if row["level"].lower() == level.lower()]
+    videos = [Video.from_row(row) for row in rows]
+    grouped: list[dict[str, Any]] = []
+    for level_key in (level_filter,) if level_filter else VIDEO_LEVEL_ORDER.keys():
+        level_videos = [video for video in videos if video.level.lower() == level_key]
+        if not level_videos:
+            continue
+        level_videos.sort(key=lambda video: (VIDEO_LEVEL_ORDER.get(video.level.lower(), 99), video.title))
+        grouped.append(
+            {
+                "level": level_key,
+                "label": VIDEO_LEVEL_LABELS.get(level_key, level_key.title()),
+                "videos": [
+                    {
+                        "id": video.id,
+                        "title": video.title,
+                        "url": video.url,
+                        "watch_url": video.url,
+                        "embed_url": video.embed_url,
+                        "youtube_id": video.youtube_id,
+                        "level": video.level,
+                        "category": video.category,
+                        "stage": video.stage,
+                        "manual_step": video.manual_step,
+                        "description": video.description,
+                        "watched": video.id in watched_ids,
+                    }
+                    for video in level_videos
+                ],
+            }
+        )
 
-    rows.sort(key=lambda item: (VIDEO_LEVEL_ORDER.get(item["level"], 99), item["title"]))
-
-    watched_ids = database.get_watched_video_ids(int(g.current_user["id"]))
-    for row in rows:
-        row["watched"] = row.get("id") in watched_ids
-    return jsonify({"success": True, "videos": rows})
+    return jsonify({"success": True, "videos": grouped})
 
 
 @api_bp.post("/videos/<int:video_id>/watch")
 @require_auth
 def track_video(video_id: int) -> tuple[Response, int]:
-    database.record_video_watch(int(g.current_user["id"]), video_id)
-    watched = len(database.get_watched_video_ids(int(g.current_user["id"])))
+    database.record_video_watch(g.current_user.id, video_id)
+    watched = len(database.get_watched_video_ids(g.current_user.id))
     total = max(database.total_videos(), 1)
     progress = round(watched / total, 2)
     return (
@@ -384,38 +425,102 @@ def manual_steps() -> Response:
     return jsonify({"success": True, "steps": steps})
 
 
-@api_bp.get("/marketplace/architects")
-def list_architects() -> Response:
-    city = request.args.get("city")
-    specialty = request.args.get("specialty")
-    architects = database.fetch_rows(
-        """
-        SELECT name, specialty, price_range, city, portfolio_url, rating
-        FROM architects
-        WHERE (? IS NULL OR city = ?)
-        AND (? IS NULL OR specialty = ?)
-        ORDER BY rating DESC
-        """,
-        (city, city, specialty, specialty),
+@api_bp.get("/marketplace/providers")
+def list_marketplace_providers() -> Response:
+    city = (request.args.get("city") or "").strip() or None
+    provider_type = (request.args.get("type") or "").strip() or None
+    price_min = request.args.get("min_price")
+    price_max = request.args.get("max_price")
+
+    def _to_float(value: str | None) -> float | None:
+        if not value:
+            return None
+        try:
+            return float(value)
+        except ValueError:
+            return None
+
+    providers = [
+        Provider.from_row(row)
+        for row in database.list_providers(
+            city=city,
+            provider_type=provider_type,
+            price_min=_to_float(price_min),
+            price_max=_to_float(price_max),
+        )
+    ]
+
+    return jsonify(
+        {
+            "success": True,
+            "providers": [
+                {
+                    "id": provider.id,
+                    "name": provider.name,
+                    "type": provider.provider_type,
+                    "specialty": provider.specialty,
+                    "city": provider.city,
+                    "locality": provider.locality,
+                    "price_min": provider.price_min,
+                    "price_max": provider.price_max,
+                    "rating": provider.rating,
+                    "description": provider.description,
+                    "contact": provider.contact,
+                    "portfolio_url": provider.portfolio_url,
+                    "experience_years": provider.experience_years,
+                }
+                for provider in providers
+            ],
+        }
     )
-    return jsonify({"success": True, "architects": architects})
 
 
-@api_bp.get("/marketplace/suppliers")
-def list_suppliers() -> Response:
-    city = request.args.get("city")
-    material = request.args.get("material")
-    suppliers = database.fetch_rows(
-        """
-        SELECT name, address, city, contact, material_focus, latitude, longitude, rating
-        FROM suppliers
-        WHERE (? IS NULL OR city = ?)
-        AND (? IS NULL OR material_focus = ?)
-        ORDER BY rating DESC
-        """,
-        (city, city, material, material),
+@api_bp.post("/marketplace/hire")
+@require_auth
+def create_hire() -> tuple[Response, int]:
+    payload = request.get_json(force=True, silent=True) or {}
+    provider_id = payload.get("provider_id")
+    project_id = payload.get("project_id")
+    message = (payload.get("message") or "").strip() or None
+
+    if not provider_id or not project_id:
+        return (
+            jsonify({"success": False, "error": "Debes seleccionar un proveedor y un proyecto"}),
+            HTTPStatus.BAD_REQUEST,
+        )
+
+    provider = database.get_provider(int(provider_id))
+    if not provider:
+        return jsonify({"success": False, "error": "Proveedor no encontrado"}), HTTPStatus.NOT_FOUND
+
+    project = database.get_user_project(int(project_id), g.current_user.id)
+    if project is None:
+        return jsonify({"success": False, "error": "Proyecto inválido"}), HTTPStatus.NOT_FOUND
+
+    hire_id = database.create_hire_request(
+        user_id=g.current_user.id,
+        project_id=int(project_id),
+        provider_id=int(provider_id),
+        message=message,
     )
-    return jsonify({"success": True, "suppliers": suppliers})
+
+    return (
+        jsonify(
+            {
+                "success": True,
+                "hire_id": hire_id,
+                "message": "Solicitud enviada al proveedor",
+            }
+        ),
+        HTTPStatus.CREATED,
+    )
+
+
+@api_bp.get("/marketplace/hire")
+@require_auth
+def list_hires() -> Response:
+    hires = database.list_hire_requests(g.current_user.id)
+    return jsonify({"success": True, "requests": hires})
 
 
 @api_bp.get("/marketplace/alerts")

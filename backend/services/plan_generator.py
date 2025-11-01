@@ -139,6 +139,9 @@ def generate_project_package(form_data: dict[str, Any]) -> dict[str, Any]:
             "preferences": form_data.get("preferencias", []),
             "city": form_data.get("ciudad"),
             "locality": form_data.get("localidad"),
+            "orientation": form_data.get("orientacion"),
+            "ventilation": form_data.get("ventilacion"),
+            "lighting": form_data.get("iluminacion"),
         },
         "site": site,
         "plans": blueprints,
@@ -175,8 +178,13 @@ def _generate_blueprints(
     options = []
     for template in PLAN_TEMPLATES:
         compatibility = _score_template(template, form_data, total_area)
-        layout = _layout_rooms(rooms, form_data.get("ancho_terreno", 0), form_data.get("largo_terreno", 0))
-        svg_markup = _create_svg(template["svg_template"], layout)
+        layout, metrics = _layout_rooms(
+            rooms,
+            form_data.get("ancho_terreno", 0),
+            form_data.get("largo_terreno", 0),
+            orientation=form_data.get("orientacion"),
+        )
+        svg_markup, svg_meta = _create_svg(template["svg_template"], layout, metrics, form_data)
         options.append(
             {
                 "name": template["name"],
@@ -186,6 +194,8 @@ def _generate_blueprints(
                     "svg": svg_markup,
                     "rooms": layout,
                     "legend": _build_room_legend(layout),
+                    "scale": svg_meta["scale_label"],
+                    "orientation": svg_meta["orientation"],
                 },
                 "blueprint_3d": {
                     "volumes": _generate_volumes(layout, levels=form_data["plantas"]),
@@ -207,16 +217,33 @@ def _score_template(template: dict[str, Any], form_data: dict[str, Any], total_a
     return max(0.0, min(score, 1.0))
 
 
-def _layout_rooms(rooms: list[Room], width: float, length: float) -> list[dict[str, Any]]:
+def _layout_rooms(
+    rooms: list[Room],
+    width: float,
+    length: float,
+    *,
+    orientation: str | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, float]]:
     grid_columns = max(2, math.ceil(math.sqrt(len(rooms))))
     cell_width = width / grid_columns
     cell_length = length / math.ceil(len(rooms) / grid_columns)
     layout = []
+    orientation = (orientation or "norte").lower()
+    total_width = 0.0
+    total_length = 0.0
     for index, room in enumerate(rooms):
         column = index % grid_columns
         row = index // grid_columns
         color = _room_color(room.type)
         guide_video = get_video_by_manual_step(room.guide) if room.guide else None
+        door_width = cell_width * 0.3
+        door_x = column * cell_width + (cell_width - door_width) / 2
+        door_y = (row + 1) * cell_length
+        window_width = cell_width * 0.35
+        window_x = column * cell_width + (cell_width - window_width) / 2
+        window_y = row * cell_length
+        total_width = max(total_width, (column + 1) * cell_width)
+        total_length = max(total_length, (row + 1) * cell_length)
         layout.append(
             {
                 "name": room.name,
@@ -238,9 +265,32 @@ def _layout_rooms(rooms: list[Room], width: float, length: float) -> list[dict[s
                     "manual_step": room.guide,
                     "video": guide_video,
                 },
+                "openings": {
+                    "doors": [
+                        {
+                            "x": round(door_x, 2),
+                            "y": round(door_y, 2),
+                            "width": round(door_width, 2),
+                        }
+                    ],
+                    "windows": [
+                        {
+                            "x": round(window_x, 2),
+                            "y": round(window_y, 2),
+                            "width": round(window_width, 2),
+                        }
+                    ],
+                },
+                "orientation": orientation,
             }
         )
-    return layout
+    metrics = {
+        "cell_width": round(cell_width, 2),
+        "cell_length": round(cell_length, 2),
+        "width": round(total_width, 2),
+        "length": round(total_length, 2),
+    }
+    return layout, metrics
 
 
 def _generate_volumes(layout: list[dict[str, Any]], levels: int) -> list[dict[str, Any]]:
@@ -358,41 +408,107 @@ def _materials_for_level(level: str, items: list[dict[str, Any]]) -> list[dict[s
     return items
 
 
-def _create_svg(path: str, rooms: list[dict[str, Any]]) -> str:
-    grid_lines = []
-    for offset in range(20, 340, 20):
+def _create_svg(
+    path: str,
+    rooms: list[dict[str, Any]],
+    metrics: dict[str, float],
+    form_data: dict[str, Any],
+) -> tuple[str, dict[str, str]]:
+    orientation = (form_data.get("orientacion") or "norte").lower()
+    orientation_angles = {"norte": 0, "este": 90, "sur": 180, "oeste": 270}
+    north_rotation = orientation_angles.get(orientation, 0)
+    width_m = max(metrics.get("width", 8.0), 6.0)
+    length_m = max(metrics.get("length", 8.0), 6.0)
+    width_px = width_m * 10
+    length_px = length_m * 10
+    margin_x = 60
+    margin_y = 80
+    view_width = width_px + margin_x * 2 + 120
+    view_height = length_px + margin_y * 2 + 160
+
+    grid_lines: list[str] = []
+    for offset in range(0, int(width_px) + 40, 40):
+        x = margin_x + offset
         grid_lines.append(
-            f"<line x1='{offset}' y1='20' x2='{offset}' y2='220' stroke='rgba(148,163,184,0.2)' stroke-width='0.5' />"
+            f"<line x1='{x:.1f}' y1='{margin_y:.1f}' x2='{x:.1f}' y2='{margin_y + length_px:.1f}' stroke='rgba(148,163,184,0.18)' stroke-width='0.6' />"
         )
+    for offset in range(0, int(length_px) + 40, 40):
+        y = margin_y + offset
         grid_lines.append(
-            f"<line x1='20' y1='{offset}' x2='340' y2='{offset}' stroke='rgba(148,163,184,0.2)' stroke-width='0.5' />"
+            f"<line x1='{margin_x:.1f}' y1='{y:.1f}' x2='{margin_x + width_px:.1f}' y2='{y:.1f}' stroke='rgba(148,163,184,0.18)' stroke-width='0.6' />"
         )
 
-    room_rects: list[str] = []
+    room_layers: list[str] = []
     for room in rooms:
-        x = room["position"]["x"] * 10 + 20
-        y = room["position"]["y"] * 10 + 20
+        x = margin_x + room["position"]["x"] * 10
+        y = margin_y + room["position"]["y"] * 10
         width = room["dimensions"]["width"] * 10
         length = room["dimensions"]["length"] * 10
-        room_rects.append(
-            f"<g class='room' data-room='{room['name']}'>"
-            f"<rect x='{x:.1f}' y='{y:.1f}' width='{width:.1f}' height='{length:.1f}' rx='10' ry='10'"
-            f" fill='{room['style']['fill']}' stroke='{room['style']['stroke']}' stroke-width='2' />"
-            f"<text x='{x + width / 2:.1f}' y='{y + length / 2:.1f}' fill='{room['style']['text']}'"
-            " font-size='11' font-family='Inter, sans-serif' text-anchor='middle' dominant-baseline='middle'>"
-            f"{room['name']}" "</text>"
-            "</g>"
+        door_width = width * 0.32
+        door_x = x + (width - door_width) / 2
+        door_y = y + length
+        window_width = width * 0.4
+        window_x = x + (width - window_width) / 2
+        window_y = y
+        room_layers.append(
+            "<g class='room' data-room='"
+            + room["name"]
+            + "'>"
+            + f"<rect x='{x:.1f}' y='{y:.1f}' width='{width:.1f}' height='{length:.1f}' rx='12' ry='12'"
+            + f" fill='{room['style']['fill']}' stroke='{room['style']['stroke']}' stroke-width='2.2' />"
+            + f"<line x1='{door_x:.1f}' y1='{door_y:.1f}' x2='{door_x + door_width:.1f}' y2='{door_y:.1f}' stroke='#f59e0b' stroke-width='2.6' stroke-linecap='round' />"
+            + f"<rect x='{window_x:.1f}' y='{window_y - 2:.1f}' width='{window_width:.1f}' height='4' fill='rgba(59,130,246,0.45)' stroke='#3b82f6' stroke-dasharray='6 4' />"
+            + f"<text x='{x + width / 2:.1f}' y='{y + length / 2 - 6:.1f}' fill='{room['style']['text']}' font-size='12' font-family='Inter, sans-serif' text-anchor='middle' dominant-baseline='middle'>{room['name']}</text>"
+            + f"<text x='{x + width / 2:.1f}' y='{y + length / 2 + 10:.1f}' fill='#475569' font-size='10' font-family='Inter, sans-serif' text-anchor='middle'>{room['area']} m²</text>"
+            + "</g>"
         )
+
+    dimension_lines = (
+        f"<line x1='{margin_x:.1f}' y1='{margin_y + length_px + 24:.1f}' x2='{margin_x + width_px:.1f}' y2='{margin_y + length_px + 24:.1f}' stroke='#94a3b8' stroke-width='1.4' marker-start='url(#arrow)' marker-end='url(#arrow)' />"
+        + f"<text x='{margin_x + width_px / 2:.1f}' y='{margin_y + length_px + 40:.1f}' fill='#475569' font-size='11' font-family='Inter, sans-serif' text-anchor='middle'>{width_m:.1f} m</text>"
+        + f"<line x1='{margin_x - 24:.1f}' y1='{margin_y:.1f}' x2='{margin_x - 24:.1f}' y2='{margin_y + length_px:.1f}' stroke='#94a3b8' stroke-width='1.4' marker-start='url(#arrow)' marker-end='url(#arrow)' />"
+        + f"<text x='{margin_x - 36:.1f}' y='{margin_y + length_px / 2:.1f}' fill='#475569' font-size='11' font-family='Inter, sans-serif' text-anchor='middle' transform='rotate(-90 {margin_x - 36:.1f} {margin_y + length_px / 2:.1f})'>{length_m:.1f} m</text>"
+    )
+
+    scale_label = _build_scale_label(width_m, length_m)
+    scale_bar = (
+        "<g transform='translate("
+        + f"{margin_x:.1f},{margin_y + length_px + 70:.1f})' fill='none' stroke='#0f172a' stroke-width='2'>"
+        + "<rect width='60' height='8' fill='#0f172a'/><rect x='60' width='60' height='8' fill='#38bdf8' />"
+        + f"<text x='0' y='24' fill='#334155' font-size='11' font-family='Inter, sans-serif'>0 m</text>"
+        + f"<text x='60' y='24' fill='#334155' font-size='11' font-family='Inter, sans-serif' text-anchor='middle'>{(width_m/2):.1f} m</text>"
+        + f"<text x='120' y='24' fill='#334155' font-size='11' font-family='Inter, sans-serif' text-anchor='end'>{width_m:.1f} m</text>"
+        + f"<text x='0' y='42' fill='#0f172a' font-weight='600' font-size='12' font-family='Inter, sans-serif'>{scale_label}</text>"
+        + "</g>"
+    )
+
+    north_arrow = (
+        "<g transform='translate("
+        + f"{margin_x + width_px + 60:.1f},{margin_y + 10:.1f}) rotate({north_rotation})' stroke='#0f172a' fill='none'>"
+        + "<polygon points='0,-22 10,10 -10,10' fill='#0f172a' />"
+        + "<line x1='0' y1='10' x2='0' y2='28' stroke-width='3' />"
+        + "<text x='0' y='42' font-size='12' font-family='Inter, sans-serif' text-anchor='middle' fill='#0f172a'>N</text>"
+        + "</g>"
+    )
+
     svg = (
-        "<svg viewBox='0 0 360 240' xmlns='http://www.w3.org/2000/svg'"
-        " style='background:#f8fafc;border-radius:18px;box-shadow:0 20px 45px rgba(15,23,42,0.18)'>"
-        "<defs><style>.room:hover{cursor:pointer;opacity:0.92;}</style></defs>"
+        f"<svg viewBox='0 0 {view_width:.1f} {view_height:.1f}' xmlns='http://www.w3.org/2000/svg' style='background:#f8fafc;border-radius:18px;box-shadow:0 24px 60px rgba(15,23,42,0.18)'>"
+        "<defs>"
+        "<marker id='arrow' markerWidth='6' markerHeight='6' refX='3' refY='3' orient='auto-start-reverse'>"
+        "<path d='M0,0 L6,3 L0,6 z' fill='#94a3b8'/></marker>"
+        "<style>.room:hover{cursor:pointer;opacity:0.92;}</style>"
+        "</defs>"
+        f"<rect x='{margin_x - 18:.1f}' y='{margin_y - 18:.1f}' width='{width_px + 36:.1f}' height='{length_px + 36:.1f}' fill='rgba(15,23,42,0.06)' stroke='#0f172a' stroke-width='1.4' stroke-dasharray='12 10' />"
         + "".join(grid_lines)
-        + f"<path d='{path}' fill='rgba(148,163,184,0.15)' stroke='#0f172a' stroke-width='3' />"
-        + "".join(room_rects)
+        + f"<path d='{path}' fill='rgba(148,163,184,0.12)' stroke='#0f172a' stroke-width='2.5' transform='translate({margin_x:.1f},{margin_y:.1f})' />"
+        + "".join(room_layers)
+        + dimension_lines
+        + scale_bar
+        + north_arrow
         + "</svg>"
     )
-    return svg
+    metadata = {"scale_label": scale_label, "orientation": orientation.upper()}
+    return svg, metadata
 
 
 def _room_color(room_type: str) -> str:
@@ -405,6 +521,15 @@ def _room_color(room_type: str) -> str:
         "general": "#e0f2fe",
     }
     return palette.get(room_type, "#e2e8f0")
+
+
+def _build_scale_label(width_m: float, length_m: float) -> str:
+    max_dimension = max(width_m, length_m)
+    if max_dimension <= 12:
+        return "Escala gráfica 1:50"
+    if max_dimension <= 20:
+        return "Escala gráfica 1:75"
+    return "Escala gráfica 1:100"
 
 
 def _build_room_legend(rooms: list[dict[str, Any]]) -> list[dict[str, str]]:

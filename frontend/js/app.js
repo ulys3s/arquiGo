@@ -5,6 +5,9 @@ const state = {
   user: JSON.parse(localStorage.getItem("cs_user") || "null"),
   currentProjectId: null,
   blueprintRooms: [],
+  blueprintZoom: 1,
+  providers: [],
+  selectedProvider: null,
 };
 
 const geoIndex = {
@@ -35,8 +38,15 @@ const elements = {
   projectResults: document.querySelector("#projectResults"),
   viabilityScore: document.querySelector("#viabilityScore"),
   blueprint2D: document.querySelector("#blueprint2D"),
+  blueprintCanvas: document.querySelector("#blueprintCanvas"),
   blueprintLegend: document.querySelector("#blueprintLegend"),
   blueprint3D: document.querySelector("#blueprint3D"),
+  blueprintScale: document.querySelector("#blueprintScale"),
+  blueprintOrientation: document.querySelector("#blueprintOrientation"),
+  blueprintZoomSlider: document.querySelector("#blueprintZoom"),
+  blueprintZoomValue: document.querySelector("#blueprintZoomValue"),
+  blueprintDownloadPng: document.querySelector("#downloadPlanPng"),
+  blueprintDownloadPdf: document.querySelector("#downloadPlanPdf"),
   roomGuide: document.querySelector("#roomGuide"),
   manualSteps: document.querySelector("#manualSteps"),
   materialList: document.querySelector("#materialList"),
@@ -54,12 +64,26 @@ const elements = {
   videoContainer: document.querySelector("#videoList"),
   videoFilterLevel: document.querySelector("#videoLevel"),
   videoFilterSearch: document.querySelector("#videoSearch"),
+  learningVideos: document.querySelector("#learningVideos"),
   citySelect: document.querySelector("select[name='ciudad']"),
   localitySelect: document.querySelector("select[name='localidad']"),
   preferencesChips: document.querySelectorAll("input[name='preferencias']"),
   projectMap: document.querySelector("#projectMap"),
   solarOrientation: document.querySelector("#solarOrientation"),
   siteRecommendations: document.querySelector("#siteRecommendations"),
+  providerList: document.querySelector("#providerList"),
+  providerCity: document.querySelector("#providerCity"),
+  providerType: document.querySelector("#providerType"),
+  providerPriceMin: document.querySelector("#providerPriceMin"),
+  providerPriceMax: document.querySelector("#providerPriceMax"),
+  providerFilters: document.querySelector("#providerFilters"),
+  hireModal: document.querySelector("#hireModal"),
+  closeHireModal: document.querySelector("#closeHireModal"),
+  hireForm: document.querySelector("#hireForm"),
+  hireProviderName: document.querySelector("#hireProviderName"),
+  hireProjectSelect: document.querySelector("#hireProject"),
+  hireMessage: document.querySelector("#hireMessage"),
+  hireRequestList: document.querySelector("#hireRequestList"),
 };
 
 let projectMapInstance;
@@ -69,9 +93,13 @@ document.addEventListener("DOMContentLoaded", () => {
   attachAuthHandlers();
   attachProjectHandlers();
   attachVideoHandlers();
+  attachBlueprintToolbar();
+  attachMarketplaceHandlers();
   hydrateAuthState();
   initLocationControls();
   initProjectMap();
+  loadProviders().catch(console.error);
+  setBlueprintZoom(state.blueprintZoom);
   elements.refreshManual?.addEventListener("click", () => {
     if (ensureAuth()) loadManualLevels();
   });
@@ -119,6 +147,7 @@ function attachProjectHandlers() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "No se pudo generar el proyecto");
       state.currentProjectId = data.project_id;
+      state.blueprintZoom = 1;
       renderProject(data);
       await Promise.all([loadProjects(), loadDashboard()]);
     } catch (error) {
@@ -141,6 +170,36 @@ function attachVideoHandlers() {
   if (elements.videoFilterSearch) {
     elements.videoFilterSearch.addEventListener("input", debounce(loadVideos, 350));
   }
+}
+
+function attachBlueprintToolbar() {
+  elements.blueprintZoomSlider?.addEventListener("input", (event) => {
+    const value = Number(event.target.value);
+    setBlueprintZoom(value);
+  });
+  elements.blueprintDownloadPng?.addEventListener("click", () => downloadBlueprint("png"));
+  elements.blueprintDownloadPdf?.addEventListener("click", () => downloadBlueprint("pdf"));
+}
+
+function attachMarketplaceHandlers() {
+  const filterElements = [
+    elements.providerCity,
+    elements.providerType,
+    elements.providerPriceMin,
+    elements.providerPriceMax,
+  ];
+  filterElements.forEach((input) =>
+    input?.addEventListener("change", () => loadProviders().catch(console.error))
+  );
+  elements.providerFilters?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    loadProviders().catch(console.error);
+  });
+  elements.closeHireModal?.addEventListener("click", () => closeHireModal());
+  elements.hireModal?.addEventListener("click", (event) => {
+    if (event.target === elements.hireModal) closeHireModal();
+  });
+  elements.hireForm?.addEventListener("submit", handleHireSubmit);
 }
 
 async function authenticateUser(endpoint, formData) {
@@ -201,6 +260,9 @@ function clearAuthState() {
   if (elements.dashboardRecommendations)
     elements.dashboardRecommendations.innerHTML =
       '<p class="text-sm text-slate-400">Genera tu primer proyecto para recibir recomendaciones.</p>';
+  if (elements.hireRequestList)
+    elements.hireRequestList.innerHTML =
+      '<p class="text-sm text-slate-400">Inicia sesión para llevar control de tus solicitudes.</p>';
 }
 
 function updateUserBadge() {
@@ -280,6 +342,7 @@ async function loadProjects() {
   if (!response.ok || !data.success) throw new Error(data.error || "No se pudieron cargar los proyectos");
   const { projects } = data;
   renderProjectList(projects);
+  updateHireProjectOptions(projects);
   if (projects.length && !state.currentProjectId) {
     state.currentProjectId = projects[0].id;
     renderProject(projects[0].plan_data);
@@ -308,6 +371,25 @@ function renderDashboard(data) {
       compact: true,
       emptyMessage: "Genera tu primer proyecto para recibir recomendaciones.",
     });
+  }
+  if (elements.hireRequestList) {
+    const requests = data.hire_requests || [];
+    elements.hireRequestList.innerHTML = requests.length
+      ? requests
+          .map(
+            (request) => `
+              <li class="rounded-2xl border border-slate-800 bg-slate-900/50 p-4 text-sm">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <span class="font-semibold text-emerald-200">${request.provider_name}</span>
+                  <span class="text-xs uppercase tracking-wide text-slate-400">${request.status}</span>
+                </div>
+                <p class="mt-1 text-xs text-slate-400">Proyecto #${request.project_id} · ${new Date(request.created_at).toLocaleDateString()}</p>
+                <p class="mt-2 text-xs text-slate-500">Contacto: ${request.contact || "En revisión"}</p>
+              </li>
+            `
+          )
+          .join("")
+      : '<p class="text-sm text-slate-400">Todavía no has enviado solicitudes. Usa el botón "Contratar" en el marketplace.</p>';
   }
 }
 
@@ -353,9 +435,16 @@ function renderProject(data) {
   if (elements.blueprint2D) {
     elements.blueprint2D.innerHTML = data.plans.selected.blueprint_2d.svg;
     state.blueprintRooms = data.plans.selected.blueprint_2d.rooms;
+    setBlueprintZoom(state.blueprintZoom);
     attachRoomInteractions();
   }
   if (elements.blueprintLegend) renderBlueprintLegend();
+  if (elements.blueprintScale) {
+    elements.blueprintScale.textContent = data.plans.selected.blueprint_2d.scale || "Escala gráfica 1:50";
+  }
+  if (elements.blueprintOrientation) {
+    elements.blueprintOrientation.textContent = data.plans.selected.blueprint_2d.orientation || "NORTE";
+  }
   if (elements.blueprint3D) {
     elements.blueprint3D.innerHTML = data.plans.selected.blueprint_3d.volumes
       .map(
@@ -376,7 +465,7 @@ function renderProject(data) {
           <li class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
             <h5 class="text-emerald-300">${step.title}</h5>
             <p class="mt-1 text-sm text-slate-300">${step.description}</p>
-            ${step.video ? `<a class="mt-2 inline-flex items-center text-xs text-emerald-300" href="https://www.youtube.com/watch?v=${step.video.youtube_id}" target="_blank" rel="noopener">Ver guía en YouTube</a>` : ""}
+            ${step.video ? `<a class="mt-2 inline-flex items-center text-xs text-emerald-300" href="${step.video.url || `https://www.youtube.com/watch?v=${step.video.youtube_id}` }" target="_blank" rel="noopener">Ver guía en YouTube</a>` : ""}
           </li>
         `
       )
@@ -468,7 +557,7 @@ function renderRoomGuide(room) {
       ${manualStep ? `<p class="mt-2 text-xs uppercase tracking-wide text-emerald-200">Guía vinculada: ${manualStep.replace(/_/g, " ")}</p>` : ""}
       ${video ? `
         <div class="mt-3 overflow-hidden rounded-xl">
-          <iframe class="aspect-video w-full" src="https://www.youtube.com/embed/${video.youtube_id}" title="${video.title}" allowfullscreen loading="lazy"></iframe>
+          <iframe class="aspect-video w-full" src="${video.embed_url || `https://www.youtube.com/embed/${video.youtube_id}` }" title="${video.title}" allowfullscreen loading="lazy"></iframe>
         </div>
         <button class="mt-3 rounded-full bg-emerald-500 px-4 py-2 text-xs font-semibold text-slate-950" data-watch-video="${video.id}">Marcar como visto</button>
       ` : ""}
@@ -511,7 +600,7 @@ async function loadManualLevels() {
             ${step.videos
               .map(
                 (video) => `
-                  <a class="block rounded-xl border border-slate-800 bg-slate-900/40 p-3 text-sm text-slate-200 hover:border-emerald-400" href="https://www.youtube.com/watch?v=${video.youtube_id}" target="_blank" rel="noopener">
+                  <a class="block rounded-xl border border-slate-800 bg-slate-900/40 p-3 text-sm text-slate-200 hover:border-emerald-400" href="${video.url || `https://www.youtube.com/watch?v=${video.youtube_id}` }" target="_blank" rel="noopener">
                     <p class="font-semibold text-emerald-200">${video.title}</p>
                     <p class="text-xs text-slate-400">${video.description}</p>
                   </a>
@@ -530,7 +619,8 @@ async function loadVideos() {
   const params = new URLSearchParams();
   if (elements.videoFilterLevel?.value) params.set("level", elements.videoFilterLevel.value);
   if (elements.videoFilterSearch?.value) params.set("search", elements.videoFilterSearch.value);
-  const response = await fetchWithAuth(`${API_BASE}/videos?${params.toString()}`);
+  const query = params.toString();
+  const response = await fetchWithAuth(`${API_BASE}/videos${query ? `?${query}` : ""}`);
   const data = await response.json();
   if (!response.ok || !data.success) return;
   const { videos } = data;
@@ -545,22 +635,36 @@ function renderVideoLibrary(videos) {
   }
   elements.videoContainer.innerHTML = videos
     .map(
-      (video) => `
-        <article class="rounded-3xl border border-slate-800 bg-slate-900/60 p-4">
-          <header class="flex items-center justify-between gap-3">
-            <h3 class="text-lg font-semibold text-emerald-300">${video.title}</h3>
-            <span class="rounded-full bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200">${capitalize(video.level)}</span>
+      (group) => `
+        <section class="space-y-4">
+          <header class="flex flex-wrap items-center justify-between gap-3">
+            <h3 class="text-xl font-semibold text-emerald-300">${group.label}</h3>
+            <span class="text-xs uppercase tracking-wider text-slate-400">${group.videos.length} videos</span>
           </header>
-          <div class="mt-3 overflow-hidden rounded-xl">
-            <iframe class="aspect-video w-full" src="https://www.youtube.com/embed/${video.youtube_id}" allowfullscreen loading="lazy" title="${video.title}"></iframe>
+          <div class="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+            ${group.videos
+              .map(
+                (video) => `
+                  <article class="rounded-3xl border border-slate-800 bg-slate-900/60 p-4">
+                    <header class="flex items-center justify-between gap-3">
+                      <h4 class="text-lg font-semibold text-slate-100">${video.title}</h4>
+                      <span class="rounded-full bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200">${group.label}</span>
+                    </header>
+                    <div class="mt-3 overflow-hidden rounded-xl">
+                      <iframe class="aspect-video w-full" src="${video.embed_url || `https://www.youtube.com/embed/${video.youtube_id}` }" allowfullscreen loading="lazy" title="${video.title}"></iframe>
+                    </div>
+                    <p class="mt-3 text-sm text-slate-300">${video.description || ""}</p>
+                    <p class="mt-2 text-xs text-slate-400">Etapa: ${video.stage || "General"}</p>
+                    <p class="text-xs text-slate-500">Manual: ${(video.manual_step || "general").replace(/_/g, " ")}</p>
+                    <button class="mt-3 w-full rounded-full ${video.watched ? "bg-slate-800 text-emerald-200" : "bg-emerald-500 text-slate-950"} px-4 py-2 text-sm font-semibold" data-watch-video="${video.id}">
+                      ${video.watched ? "Marcado como visto" : "Marcar como visto"}
+                    </button>
+                  </article>
+                `
+              )
+              .join("")}
           </div>
-          <p class="mt-3 text-sm text-slate-300">${video.description}</p>
-          <p class="mt-2 text-xs text-slate-400">Etapa: ${video.stage || "General"}</p>
-          <p class="text-xs text-slate-500">Paso del manual: ${(video.manual_step || "general").replace(/_/g, " ")}</p>
-          <button class="mt-3 w-full rounded-full ${video.watched ? "bg-slate-800 text-emerald-200" : "bg-emerald-500 text-slate-950"} px-4 py-2 text-sm font-semibold" data-watch-video="${video.id}">
-            ${video.watched ? "Marcado como visto" : "Marcar como visto"}
-          </button>
-        </article>
+        </section>
       `
     )
     .join("");
@@ -589,7 +693,7 @@ function renderPlaylist(container, playlist, { compact = false, emptyMessage = "
                         <p class="text-sm font-semibold text-slate-100">${video.title}</p>
                         <p class="text-xs text-slate-400">${video.description}</p>
                         <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                          <a class="text-emerald-300" href="https://www.youtube.com/watch?v=${video.youtube_id}" target="_blank" rel="noopener">Ver en YouTube</a>
+                          <a class="text-emerald-300" href="${video.url || `https://www.youtube.com/watch?v=${video.youtube_id}` }" target="_blank" rel="noopener">Ver en YouTube</a>
                           <button class="rounded-full border border-emerald-400/40 px-3 py-1 text-emerald-200" data-watch-video="${video.id}">Marcar como visto</button>
                         </div>
                       </div>
@@ -599,7 +703,7 @@ function renderPlaylist(container, playlist, { compact = false, emptyMessage = "
                         <p class="text-sm font-semibold text-slate-100">${video.title}</p>
                         <p class="text-xs text-slate-400">${video.description}</p>
                         <div class="mt-3 overflow-hidden rounded-xl">
-                          <iframe class="aspect-video w-full" src="https://www.youtube.com/embed/${video.youtube_id}" title="${video.title}" allowfullscreen loading="lazy"></iframe>
+                          <iframe class="aspect-video w-full" src="${video.embed_url || `https://www.youtube.com/embed/${video.youtube_id}` }" title="${video.title}" allowfullscreen loading="lazy"></iframe>
                         </div>
                         <button class="mt-3 rounded-full bg-emerald-500 px-4 py-2 text-xs font-semibold text-slate-950" data-watch-video="${video.id}">Marcar como visto</button>
                       </div>
@@ -639,6 +743,98 @@ async function markVideoAsWatched(videoId, button) {
   loadDashboard().catch(console.error);
 }
 
+function setBlueprintZoom(value) {
+  state.blueprintZoom = Number(value) || 1;
+  if (elements.blueprintZoomSlider && Number(elements.blueprintZoomSlider.value) !== state.blueprintZoom) {
+    elements.blueprintZoomSlider.value = state.blueprintZoom;
+  }
+  if (elements.blueprintZoomValue) {
+    elements.blueprintZoomValue.textContent = `${Math.round(state.blueprintZoom * 100)}%`;
+  }
+  const svg = elements.blueprint2D?.querySelector("svg");
+  if (svg) {
+    svg.style.transformOrigin = "0 0";
+    svg.style.transform = `scale(${state.blueprintZoom})`;
+  }
+}
+
+async function downloadBlueprint(format) {
+  const svg = elements.blueprint2D?.querySelector("svg");
+  if (!svg) {
+    alert("Genera un proyecto para descargar el plano.");
+    return;
+  }
+  try {
+    const { dataUrl, width, height } = await convertSvgToPng(svg);
+    if (format === "png") {
+      downloadDataUrl(dataUrl, `plano_2d_${Date.now()}.png`);
+      return;
+    }
+    openPdfPreview(dataUrl, width, height);
+  } catch (error) {
+    console.error(error);
+    alert("No pudimos exportar el plano. Intenta nuevamente.");
+  }
+}
+
+function convertSvgToPng(svg) {
+  return new Promise((resolve, reject) => {
+    const serializer = new XMLSerializer();
+    const source = serializer.serializeToString(svg);
+    const viewBox = (svg.getAttribute("viewBox") || `0 0 ${svg.clientWidth || 1024} ${svg.clientHeight || 768}`).split(" ");
+    const width = Number(viewBox[2]);
+    const height = Number(viewBox[3]);
+    const canvas = document.createElement("canvas");
+    const scale = window.devicePixelRatio > 1 ? 2 : 1.5;
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+    const context = canvas.getContext("2d");
+    const image = new Image();
+    image.onload = () => {
+      context.fillStyle = "#f8fafc";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      resolve({ dataUrl: canvas.toDataURL("image/png"), width, height });
+    };
+    image.onerror = (error) => reject(error);
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`;
+  });
+}
+
+function downloadDataUrl(url, filename) {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+}
+
+function openPdfPreview(imageDataUrl, width, height) {
+  const popup = window.open("", "_blank", "noopener");
+  if (!popup) {
+    alert("Habilita las ventanas emergentes para exportar a PDF.");
+    return;
+  }
+  popup.document.write(`
+    <html>
+      <head>
+        <title>Plano 2D - Exportación PDF</title>
+        <style>
+          body { margin: 0; padding: 24px; background: #f8fafc; font-family: 'Inter', sans-serif; color: #1f2937; }
+          img { width: 100%; max-width: ${width}px; height: auto; box-shadow: 0 20px 40px rgba(15,23,42,0.15); border-radius: 16px; }
+          footer { margin-top: 16px; font-size: 14px; }
+        </style>
+      </head>
+      <body>
+        <img src="${imageDataUrl}" alt="Plano 2D" />
+        <footer>Utiliza el comando <strong>Imprimir &gt; Guardar como PDF</strong> de tu navegador para descargar este plano.</footer>
+      </body>
+    </html>
+  `);
+  popup.document.close();
+}
+
 function initLocationControls() {
   if (!elements.citySelect || !elements.localitySelect) return;
   elements.citySelect.addEventListener("change", () => populateLocalities());
@@ -659,6 +855,131 @@ function initProjectMap() {
     attribution: "© OpenStreetMap",
   }).addTo(projectMapInstance);
   projectZoneLayer = L.layerGroup().addTo(projectMapInstance);
+}
+
+async function loadProviders() {
+  const params = new URLSearchParams();
+  if (elements.providerCity?.value) params.set("city", elements.providerCity.value);
+  if (elements.providerType?.value) params.set("type", elements.providerType.value);
+  if (elements.providerPriceMin?.value) params.set("min_price", elements.providerPriceMin.value);
+  if (elements.providerPriceMax?.value) params.set("max_price", elements.providerPriceMax.value);
+  const query = params.toString();
+  const response = await fetch(`${API_BASE}/marketplace/providers${query ? `?${query}` : ""}`);
+  const data = await response.json();
+  if (!data.success) return;
+  state.providers = data.providers || [];
+  renderProviders(state.providers);
+}
+
+function renderProviders(providers) {
+  if (!elements.providerList) return;
+  if (!providers.length) {
+    elements.providerList.innerHTML = `<p class="text-sm text-slate-400">No encontramos proveedores con esos filtros.</p>`;
+    return;
+  }
+  elements.providerList.innerHTML = providers
+    .map(
+      (provider) => `
+        <article class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5">
+          <header class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 class="text-lg font-semibold text-emerald-300">${provider.name}</h3>
+              <p class="text-xs uppercase tracking-wider text-slate-400">${capitalize(provider.type || "")} · ${provider.city}${provider.locality ? `, ${provider.locality}` : ""}</p>
+            </div>
+            <span class="rounded-full bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200">⭐ ${Number(provider.rating || 0).toFixed(1)}</span>
+          </header>
+          <p class="mt-3 text-sm text-slate-300">${provider.specialty || ""}</p>
+          <p class="mt-2 text-xs text-slate-400">${provider.description || ""}</p>
+          <div class="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-400">
+            <span>Honorarios: ${
+              provider.price_min
+                ? `$${Number(provider.price_min).toLocaleString()}${provider.price_max ? ` - $${Number(provider.price_max).toLocaleString()}` : ""}`
+                : "A convenir"
+            }</span>
+            ${provider.experience_years ? `<span>${provider.experience_years} años de experiencia</span>` : ""}
+            ${provider.contact ? `<span>Contacto: ${provider.contact}</span>` : ""}
+          </div>
+          <div class="mt-4 flex flex-wrap items-center gap-3">
+            ${provider.portfolio_url ? `<a class="action-secondary" href="${provider.portfolio_url}" target="_blank" rel="noopener">Ver portafolio</a>` : ""}
+            <button class="action-button" data-hire="${provider.id}">Contratar / Solicitar cotización</button>
+          </div>
+        </article>
+      `
+    )
+    .join("");
+
+  elements.providerList
+    .querySelectorAll("[data-hire]")
+    .forEach((button) =>
+      button.addEventListener("click", () => {
+        const providerId = Number(button.dataset.hire);
+        openHireModal(providerId);
+      })
+    );
+}
+
+function openHireModal(providerId) {
+  if (!ensureAuth()) return;
+  const provider = state.providers.find((item) => item.id === providerId);
+  if (!provider || !elements.hireModal) return;
+  state.selectedProvider = providerId;
+  if (elements.hireProviderName) {
+    elements.hireProviderName.textContent = `${provider.name} · ${provider.city}`;
+  }
+  elements.hireModal.classList.remove("hidden");
+  elements.hireModal.classList.add("flex");
+  elements.hireMessage && (elements.hireMessage.value = "Hola, me gustaría recibir una cotización para mi proyecto generado en ConstruyeSeguro.");
+}
+
+function closeHireModal() {
+  if (!elements.hireModal) return;
+  elements.hireModal.classList.add("hidden");
+  elements.hireModal.classList.remove("flex");
+  elements.hireForm?.reset();
+  state.selectedProvider = null;
+}
+
+async function handleHireSubmit(event) {
+  event.preventDefault();
+  if (!ensureAuth()) return;
+  if (!state.selectedProvider) {
+    alert("Selecciona un proveedor antes de enviar la solicitud.");
+    return;
+  }
+  const projectId = Number(elements.hireProjectSelect?.value);
+  if (!projectId) {
+    alert("Selecciona uno de tus proyectos.");
+    return;
+  }
+  const payload = {
+    provider_id: state.selectedProvider,
+    project_id: projectId,
+    message: elements.hireMessage?.value || "",
+  };
+  const response = await fetchWithAuth(`${API_BASE}/marketplace/hire`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json();
+  if (!response.ok || !data.success) {
+    alert(data.error || "No pudimos enviar la solicitud");
+    return;
+  }
+  closeHireModal();
+  loadDashboard().catch(console.error);
+  alert(data.message || "Solicitud enviada correctamente");
+}
+
+function updateHireProjectOptions(projects) {
+  if (!elements.hireProjectSelect) return;
+  if (!projects.length) {
+    elements.hireProjectSelect.innerHTML = "<option value=''>Genera un proyecto para contratar</option>";
+    return;
+  }
+  elements.hireProjectSelect.innerHTML = projects
+    .map((project) => `<option value="${project.id}">${project.title}</option>`)
+    .join("");
 }
 
 function updateProjectMap(site, terrain) {
